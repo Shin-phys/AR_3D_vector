@@ -230,7 +230,7 @@
     const label = v => (CHOICES.filter(c => c[0] === v)[0] || [0, '未'])[1];
     const dv = window.__dev || {};
     $('#summary').textContent = [
-      'AR の確認 ' + new Date().toISOString().slice(0, 10),
+      'AR の確認 ' + new Date().toLocaleDateString('sv-SE'),     // YYYY-MM-DD（端末の日付。toISOString は UTC で前日になる）
       'UA: ' + (dv.ua || navigator.userAgent),
       'Quick Look: ' + (dv.ql ? 'あり' : 'なし') + ' ／ WebXR: ' + (dv.xr ? 'あり' : 'なし')
     ].concat(Object.keys(name).map(k => name[k] + '：' + label(res[k]))).join('\n');

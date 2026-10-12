@@ -173,6 +173,14 @@ async function runFlow(pg, label) {
   await pg.waitForTimeout(1100);
   await shot('6-camera');
 
+  /* AR：この端末（headless）は Quick Look も WebXR も無いので欄ごと隠れる。
+     中身から USDZ・GLB が作れることだけ確かめる（実機で開くかは ar-test.html で確認済み） */
+  const arv = await pg.evaluate(async () => ({ mode: HG.panel3d.arMode(),
+    hidden: document.querySelector('#arRow').classList.contains('hide'), sz: await HG.panel3d.arSizes(0.2) }));
+  check(label + '：AR 非対応の端末では AR の欄が出ない', arv.mode === '' && arv.hidden);
+  check(label + '：いまの表示から USDZ と GLB が作れる', arv.sz.usdz > 1000 && arv.sz.glb > 1000,
+        'USDZ ' + (arv.sz.usdz / 1024).toFixed(0) + ' KB ／ GLB ' + (arv.sz.glb / 1024).toFixed(0) + ' KB');
+
   /* 再生が止められる */
   await pg.click('#playBtn'); await pg.waitForTimeout(500);
   const moved = await pg.evaluate(() => +document.querySelector('#nowSlider').value);

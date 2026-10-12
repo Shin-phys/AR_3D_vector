@@ -53,6 +53,7 @@
       HG.dom.html('#viewGuide', 'まず<b>「真上」</b>から見て、点がどう並んでいるか確かめてください。' +
         '点がきれいに並んでいなければ、矢印も読めません。');
     }
+    arDetect();
     HG.bus.emit('view3d:opened');
     if (window.innerWidth < 900) HG.steps.goTo('#viewCard');
   }
@@ -203,6 +204,75 @@
     $('#playBtn').textContent = '▶ 再生';
   }
 
+  /* ---------- AR（3D仕様.md §6） ----------
+     ★ 方式は ar-test.html の実機の結果で決めた（README「AR の確認結果」）。★
+       iPhone  … その場で USDZ を作り、blob URL のまま AR Quick Look へ（方式3）。
+                 model-viewer（1 MB）は読まない。
+       Android … model-viewer の WebXR（方式4）。Scene Viewer は公開 URL しか受けないので使えない。
+                 AR を始めるには指で押す必要があるので、1回目は model-viewer を出すところまで。
+                 生徒はその右下の AR ボタンを押す。
+       どちらも無い端末では、AR の欄ごと出さない。
+     中身はビューアがいま表示しているもの（content.js が組み立てた同じ Group）。
+     「いま」の球と影は入れない（AR にアニメーションを入れない）。 */
+  const ar = { mode: null, url: null, key: '' };
+
+  async function arDetect() {
+    if (ar.mode !== null) return ar.mode;
+    ar.mode = HG.ar.quickLookSupported() ? 'quicklook' : (await HG.ar.webxrSupported()) ? 'webxr' : '';
+    $('#arRow').classList.toggle('hide', !ar.mode);
+    return ar.mode;
+  }
+
+  function arScale() { const r = document.querySelector('input[name=arScale]:checked'); return r ? +r.value : 0.2; }
+
+  /** いま表示している中身を、書き出し用の場面にする */
+  function arScene(scale) { return HG.ar.exportScene(HG.viewer.content(), scale); }
+
+  async function arOpen() {
+    const btn = $('#arBtn');
+    if (!HG.viewer.content()) return;
+    btn.disabled = true;
+    HG.dom.text('#arInfo', 'AR 用のモデルを作っています…');
+    try {
+      const sc = arScale();
+      if (ar.mode === 'quicklook') {
+        const t0 = performance.now();
+        const blob = await HG.ar.toUSDZ(arScene(sc));
+        if (ar.url) URL.revokeObjectURL(ar.url);
+        ar.url = URL.createObjectURL(blob);
+        const what = (sc === 1 ? '実寸' : '机上サイズ（1/5）');
+        /* ★ 作るのに時間がかかったら、自動では開かない。★
+           Safari は「指で押した直後」でないと Quick Look を開かないことがある。
+           ar-test.html（方式3）は数百 ms で作れて通ったが、壁や矢印を全部出すと重くなる。
+           間に合わなかったときは、本物の <a rel="ar"> を出して、もう一度押してもらう。 */
+        if (performance.now() - t0 < 900) {
+          HG.ar.openQuickLook(ar.url);
+          HG.dom.text('#arInfo', what + 'で開きました。表示（速度・Δv・影）を変えたら、もう一度押すとその表示で開き直します。');
+        } else {
+          HG.dom.html('#arInfo', what + 'の準備ができました。<a rel="ar" class="ar-link spaced-sm" href="' + ar.url +
+            '#allowsContentScaling=0"><img src="ar-test/thumb.png" alt="" width="48" height="36"><span>ここを押して AR で開く</span></a>');
+        }
+      } else {
+        const blob = await HG.ar.toGLB(arScene(sc));
+        if (ar.url) URL.revokeObjectURL(ar.url);
+        ar.url = URL.createObjectURL(blob);
+        await HG.ar.modelViewer($('#arHost'), ar.url, { height: '260px' });
+        HG.dom.html('#arInfo', '下の枠の<b>右下の AR ボタン</b>を押すと、カメラの映像に置けます。' +
+          '表示を変えたら「AR で見る」を押し直してください。');
+      }
+    } catch (e) {
+      HG.dom.text('#arInfo', 'AR のモデルを作れませんでした：' + e.message);
+    }
+    btn.disabled = false;
+  }
+
+  /** テスト用：いまの中身から作った USDZ と GLB の大きさ */
+  async function arSizes(scale) {
+    const s = arScene(scale || 0.2);
+    const u = await HG.ar.toUSDZ(s), g = await HG.ar.toGLB(s);
+    return { usdz: u.size, glb: g.size };
+  }
+
   /* ---------- 書き出し ---------- */
   function csv3d() {
     if (!HG.recon.ready()) { alert('先に紙の四隅を押してください。'); return; }
@@ -240,6 +310,7 @@
     $('#nowSlider').oninput = e => { stopPlay(); setNow(+e.target.value); };
     $('#playBtn').onclick = () => (play ? stopPlay() : startPlay());
     $('#csv3d').onclick = csv3d;
+    $('#arBtn').onclick = arOpen;
     HG.graph.attach($('#graph'), i => { stopPlay(); setNow(i); });
 
     /* 前半を触り直したら作り直す（開いているときだけ） */
@@ -261,5 +332,5 @@
   }
 
   HG.panel3d = { attach, reset, show: show3d, back: back2d, recompute, setView, setNow,
-                 isOpen: () => open };
+                 isOpen: () => open, arSizes, arMode: () => ar.mode };
 })(window.HG = window.HG || {});

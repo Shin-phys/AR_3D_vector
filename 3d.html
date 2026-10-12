@@ -371,6 +371,21 @@
 
       <div id="revealNote" class="reveal hide"></div>
 
+      <!-- AR（3D仕様.md §6）。いま画面に出している中身を、そのまま動かない模型にして机や床に置く。
+           対応しない端末ではこの欄ごと出さない（JS が判定してから見せる）。 -->
+      <div id="arRow" class="hide">
+        <div class="sub spaced">AR（机や床に置いて回り込む）</div>
+        <div class="row tight spaced-sm">
+          <label class="chk"><input type="radio" name="arScale" value="0.2" checked> 机上サイズ（1/5）</label>
+          <label class="chk"><input type="radio" name="arScale" value="1"> 実寸（1:1）</label>
+        </div>
+        <div class="row tight spaced-sm">
+          <button id="arBtn" class="grow">AR で見る</button>
+        </div>
+        <div class="sub spaced-sm" id="arInfo"></div>
+        <div id="arHost" class="spaced-sm"></div>
+      </div>
+
       <details class="spaced">
         <summary class="sub">教師用</summary>
         <label class="chk spaced-sm"><input type="checkbox" id="usePrediction"> Δv を出す前に予測を聞く</label>
