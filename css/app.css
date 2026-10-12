@@ -1,0 +1,146 @@
+/* app.css — 画面固有のレイアウト */
+header{padding:14px 2px 10px;}
+h1{font-size:17px; margin:0; letter-spacing:.02em;}
+.phase{font-size:12px; color:var(--sub); margin-top:2px;}
+
+/* 画面1：読み込み */
+#drop{border:2px dashed var(--line); border-radius:14px; padding:26px 14px; text-align:center; background:#fff;}
+#drop.hot{border-color:var(--accent); background:#eef5fd;}
+#file{display:none;}
+.drop-title{font-weight:600; margin-bottom:10px;}
+.drop-note{margin-top:10px;}
+.load-state{margin-top:10px;}
+ul.guide{margin:6px 0 0 -8px; padding-left:20px;}
+
+/* 画面2：ステージ */
+#stage{position:relative; background:#0d1117; border-radius:var(--radius); overflow:hidden;
+       touch-action:none; display:flex; justify-content:center;}
+#cv{display:block; touch-action:none;}
+#vid{display:block; width:100%; background:#000;}
+#loupe{position:absolute; pointer-events:none; display:none; z-index:5;}
+/* ヒントは必ず pointer-events:none にすること。
+   左上の打点をこのラベルが吸い込んでしまう（実際に踏んだ不具合） */
+#hint{position:absolute; left:8px; top:8px; z-index:4; background:rgba(0,0,0,.55); color:#fff;
+      font-size:12px; padding:4px 8px; border-radius:6px;
+      pointer-events:none; transition:opacity .5s;}
+#hint.fade{opacity:0;}
+/* シークバーはトリムのカードの中。粗く飛ぶのがこのバーの唯一の仕事 */
+#tl{display:block; width:100%; height:52px; touch-action:none; margin:0 0 8px;}
+
+/* コマ番号は画面に重ねる（高さを食わない）。作図中は意味が無いので消す */
+#frameTag{position:absolute; left:8px; bottom:8px; z-index:4;
+          background:rgba(0,0,0,.55); color:#fff;
+          font:12px ui-monospace,monospace; padding:3px 7px; border-radius:6px;
+          pointer-events:none; white-space:nowrap;}
+body.drawing #frameTag, body.drawing #navRow{display:none;}
+
+/* 座標を取る：A（自動追跡）と B（手で打つ）の区切り */
+.or-split{display:flex; align-items:center; gap:10px; margin:16px 0 10px;
+          font-size:12px; color:var(--sub);}
+.or-split::before, .or-split::after{content:''; flex:1; height:1px; background:var(--line);}
+.lead-sm{font-size:13px; font-weight:700; margin-bottom:6px;}
+
+/* 予測ステップ */
+.pred-q{margin-bottom:12px;}
+.pred-qtext{font-weight:600; font-size:14px; margin-bottom:6px;}
+.pred-opt{display:flex; align-items:center; gap:8px; min-height:40px; padding:2px 6px;
+          border:1px solid var(--line); border-radius:8px; margin-bottom:5px; font-size:14px;}
+.pred-opt b{display:inline-block; width:1.4em; text-align:center; color:var(--accent);}
+.pred-title{font-size:12px; color:var(--sub); letter-spacing:.06em;}
+.pred-big{font-size:38px; font-weight:800; letter-spacing:.10em; line-height:1.15; color:var(--ink);}
+.pred-line{font-size:14px; margin-top:2px;}
+.pred-strip{display:flex; align-items:center; gap:10px; padding:8px 12px; font-size:13px; color:var(--sub);}
+.pred-strip-big{font-size:22px; letter-spacing:.10em; color:var(--ink);}
+
+/* トップページのタイル */
+.tiles{display:grid; grid-template-columns:1fr; gap:8px;}
+@media (min-width:560px){ .tiles{grid-template-columns:1fr 1fr;} }
+.tile{display:flex; flex-direction:column; align-items:flex-start; gap:2px;
+      text-align:left; padding:14px; min-height:64px; background:#fff;
+      border:1px solid var(--line); border-radius:12px; width:100%;}
+.tile:active{background:#eef1f5;}
+.tile-name{font-size:15px; font-weight:700;}
+.tile-sub{font-size:12px; color:var(--sub); font-weight:400;}
+ul.ideas{margin:6px 0 10px -8px; padding-left:20px; columns:2; font-size:13px; color:var(--sub);}
+ul.ideas li{margin:2px 0; break-inside:avoid;}
+
+/* ===== ステップの帯（1〜6） =====
+   貼り付くブロックの中に置くので、余白は詰める */
+#stepNavCard{padding:7px 9px; margin-bottom:8px;}
+.stepnav{display:flex; gap:4px; flex-wrap:wrap; align-items:center;}
+/* 済んだ段と先の段は番号だけの丸。いまやる段だけが言葉を持つ。
+   6つとも言葉付きにすると狭い画面で3行に折り返し、帯だけで 138px 使う */
+.stepnav .step{display:flex; align-items:center; justify-content:center; gap:5px;
+               min-height:32px; min-width:32px; padding:0 8px;
+               font-size:12px; border-radius:999px; background:#eef1f5; color:var(--sub);
+               border:1px solid transparent; white-space:nowrap;}
+.stepnav .step b{font-size:13px;}
+.stepnav .step.now{background:var(--accent); color:#fff; font-weight:700; padding:0 12px;}
+.stepnav .step.now .step-lead{font-size:12px;}
+.stepnav .step.ok{background:#e6f4ec; color:var(--ok); border-color:#bde0cd;}
+.stepnav .step.ok b::after{content:'✓'; margin-left:1px; font-size:11px;}
+
+/* 畳めるカード（手で打つ／教師用のモード） */
+details.card > summary{font-size:14px; font-weight:700; cursor:pointer; list-style:none;}
+details.card > summary::-webkit-details-marker{display:none;}
+details.card > summary::before{content:'▸ '; color:var(--sub); font-weight:400;}
+details.card[open] > summary::before{content:'▾ ';}
+details.card > summary + *{margin-top:10px;}
+
+/* ルーペの逃げ場。**キャンバスの中に指と重ならない場所が取れないことがある。**
+   スマホではキャンバスの高さを画面の 42% に抑えているので、130px のルーペを
+   置ける隙間が無い（下半分を触ると位置の丸め込みでルーペが指まで降りてくる）。
+   そのときはここへ逃がす。色選択では常にここを使う。 */
+#loupeBand{align-items:center; min-height:70px;}
+#loupe.docked{position:static; display:block; flex:0 0 auto;}
+#loupeInfo{line-height:1.5;}
+.note-mark{color:var(--accent); font-weight:700; margin-left:2px;}
+/* ※の説明は狭い画面だけ。PC はボタンのマウスオン（title）で足りる */
+@media (min-width:900px){ #markerHelp{display:none;} }
+
+/* ===== 加速度探究モード =====
+   作図はさせないので作図カードは出さない。代わりに専用カードを出す。
+   **body.drawing でも「使うコマ」とストロボのカードは畳まないこと。**
+   スライダーを動かすと加速度ベクトルが即時に描き直る、という往復が
+   このモードの本体で、畳むとその往復ができなくなる。 */
+#exploreCard{display:none;}
+body.mode-explore #exploreCard{display:block;}
+body.mode-explore #drawCard{display:none;}
+body.mode-explore.drawing #selectCard,
+body.mode-explore.drawing #strobeCard{display:block;}
+
+/* ストロボ画像だけを作るモードでは、追跡・打点・作図を出さない */
+body.mode-strobe #trackCard,
+body.mode-strobe #pointCard,
+body.mode-strobe #drawCard{display:none;}
+
+/* 解説。結果が出てから出す（先に読ませない） */
+.reveal{margin-top:12px; padding:10px 12px; border-radius:10px;
+        background:#f2f7fd; border:1px solid #cfe2f8;}
+.reveal-title{font-weight:700; font-size:13px; color:var(--accent); margin-bottom:4px;}
+
+/* ===== ヘッダー ===== */
+.head-row{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+#goHome{min-height:36px; padding:0 12px; font-size:13px; white-space:nowrap;}
+
+/* ===== レイアウト =====
+   スマホ：キャンバスを画面の上に貼り付け、操作はその下でスクロールする。
+           キャンバスの高さは画面の 42% までに抑える（stage.js 側で制限）。
+   PC・タブレット：キャンバスを左に固定し、操作は右の列に流す。
+   どちらも「キャンバスを見ながら操作ボタンを押せる」ことが目的。 */
+@media (min-width:900px){
+  .wrap{max-width:1240px;}
+  #screen2{display:grid; grid-template-columns:minmax(0,1.1fr) minmax(360px,0.9fr);
+           gap:14px; align-items:start;}
+  .col-main{position:sticky; top:10px;}
+  #screen0 .tiles{grid-template-columns:1fr 1fr 1fr;}
+  #screen1{display:grid; grid-template-columns:1fr 1fr; gap:0 14px; align-items:start;}
+  #screen1 > .card{margin-bottom:14px;}
+}
+@media (max-width:899px){
+  .col-main{position:sticky; top:0; z-index:20; background:var(--bg); padding-top:6px;}
+  #stageCard{margin-bottom:8px;}
+}
+
+/* ===== ⑥のレイヤー操作 ===== */
+#layerRow{border-top:1px solid var(--line); padding-top:10px;}

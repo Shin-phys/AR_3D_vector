@@ -1,0 +1,222 @@
+/* =====================================================================
+   tools/test/e2e.js — 3d.html を最初から最後まで通すテスト（ブラウザ）
+
+     node tools/test/e2e.js            # 結果だけ
+     node tools/test/e2e.js --shots    # スクリーンショットも tools/test/out/ に残す
+
+   お手本動画（合成。答えは samples/turntable.json）で、生徒と同じ操作をする：
+     タイル → お手本 → トリム（1周ぶん）→ 四隅を押す → 追う色 → 自動追跡 → はい
+     → 使うコマ（8点）→ 3D で見る → 視点・表示・影・予測
+   そのうえで、復元した半径と Δv の向きを答えと比べる。
+
+   ★ 共有モジュール（SHARED.txt）を取り込み直したら、必ずこれを走らせること。★
+   ===================================================================== */
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const { launch, serve, ROOT } = require('./pw.js');
+
+const SHOTS = process.argv.includes('--shots');
+const OUT = path.join(__dirname, 'out');
+const truth = JSON.parse(fs.readFileSync(path.join(ROOT, 'samples/turntable.json'), 'utf8'));
+let fails = 0;
+function check(name, ok, detail) {
+  console.log((ok ? '  ok   ' : '  FAIL ') + name + (detail ? '  … ' + detail : ''));
+  if (!ok) fails++;
+}
+
+/** 元解像度の座標 (x, y) をキャンバス上で押す（指と同じく pointer イベントで） */
+async function tapAt(pg, x, y, drag) {
+  const p = await pg.evaluate(([x, y]) => {
+    const c = HG.coords.toCanvas(x, y), cv = HG.stage.canvas(), r = cv.getBoundingClientRect();
+    return { x: r.left + c.x * r.width / cv.width, y: r.top + c.y * r.height / cv.height };
+  }, [x, y]);
+  await pg.mouse.move(p.x + (drag ? 25 : 0), p.y + (drag ? 18 : 0));
+  await pg.mouse.down();
+  if (drag) await pg.mouse.move(p.x, p.y, { steps: 6 });   // 置いてからずらして合わせる（2段階の照準）
+  await pg.mouse.up();
+}
+
+async function runFlow(pg, label) {
+  const errs = [];
+  pg.on('pageerror', e => errs.push(e.message));
+  pg.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errs.push(m.text()); });
+  /* 読み込めなかったファイル（ブラウザが勝手に取りに行く favicon は除く） */
+  pg.on('response', r => { if (r.status() >= 400 && !/favicon/.test(r.url())) errs.push(r.status() + ' ' + r.url()); });
+  const shot = async name => { if (SHOTS) await pg.screenshot({ path: path.join(OUT, label + '-' + name + '.png'), fullPage: false }); };
+
+  await pg.goto(pg.__base + '3d.html');
+  const tiles = await pg.$$eval('#tiles .tile', b => b.map(x => ({ id: x.dataset.id, dis: x.disabled })));
+  check(label + '：タイル3枚（準備中2枚は押せない）', tiles.length === 3 && tiles.filter(t => t.dis).length === 2,
+        tiles.map(t => t.id + (t.dis ? '(準備中)' : '')).join(' '));
+  await shot('0-tiles');
+  await pg.click('[data-id=turntable]');
+  await pg.click('#sampleBtn');
+  await pg.waitForSelector('#screen2:not(.hide)', { timeout: 60000 });
+  await pg.waitForFunction(() => HG.state.frames.length > 50 && HG.state.frames.every(f => typeof f.t === 'number'));
+  const nf = await pg.evaluate(() => HG.state.frames.length);
+  check(label + '：お手本を読み込んでコマを走査', nf >= 80, nf + ' コマ');
+
+  /* 1 トリム：t=0 から 1 周の少し手前まで */
+  const outI = Math.round(truth.T * truth.fps) - 3;
+  await pg.evaluate(() => HG.frames.showFrame(0)); await pg.click('#setIn');
+  await pg.evaluate(i => HG.frames.showFrame(i), outI); await pg.click('#setOut');
+  await pg.waitForFunction(() => HG.ui.current === 0);
+  check(label + '：ステップ1 ✓', await pg.evaluate(() => HG.steps.done(1)));
+
+  /* 2 四隅（t=0 のコマで、長い辺の端から一周） */
+  await pg.click('#cornerStart');
+  await pg.waitForTimeout(800);       // スマホ幅では「決定」が見えるところまで送るので、止まるのを待つ
+  for (let i = 0; i < 4; i++) {
+    const c = truth.corners_t0[i];
+    await tapAt(pg, c[0], c[1], i === 0);
+    if (i === 0) await shot('2-corner-aim');
+    await pg.click('#cornerDecide');
+  }
+  const ready = await pg.evaluate(() => HG.recon.ready());
+  check(label + '：ステップ2 四隅から射影変換が解ける', ready && await pg.evaluate(() => HG.steps.done(2)));
+  await shot('2-corners');
+
+  /* 3 追う色（シールの中心） */
+  await pg.click('#pickColor');
+  await tapAt(pg, truth.sticker_t0[0], truth.sticker_t0[1]);
+  await pg.click('#pickDecide');
+  check(label + '：ステップ3 ✓', await pg.evaluate(() => HG.steps.done(3)));
+
+  /* 4 自動追跡 → はい */
+  await pg.click('#runTrack');
+  await pg.waitForSelector('#trackAskRow:not(.hide)', { timeout: 60000 });
+  const rep = await pg.evaluate(() => HG.state.tracking.report);
+  check(label + '：自動追跡で見失いが少ない', rep && rep.lost.length <= 2, rep ? rep.tracked + '/' + rep.total + '（見失い ' + rep.lost.length + '）' : 'なし');
+  await pg.click('#trackOk');
+  check(label + '：ステップ4 ✓（「はい」を押した）', await pg.evaluate(() => HG.steps.done(4)));
+
+  /* 5 使うコマ（プリセットの 8 点） */
+  const sel = await pg.evaluate(() => ({ n: HG.selection.list().filter(f => f.found).length, iv: HG.state.selection.interval }));
+  check(label + '：ステップ5 使うコマ 8 点前後・✓', sel.n >= 7 && sel.n <= 9 && await pg.evaluate(() => HG.steps.done(5)),
+        sel.n + ' 点／' + sel.iv + ' コマおき');
+  check(label + '：ステップ6 は押す前は ✓ にならない', !(await pg.evaluate(() => HG.steps.done(6))));
+  await shot('5-select');
+
+  /* 6 3D で見る */
+  await pg.click('#open3d');
+  await pg.waitForTimeout(1600);     // 撮影位置 → 斜め へ回り込むアニメーション
+  check(label + '：ステップ6 ✓（3D を開いた）', await pg.evaluate(() => HG.steps.done(6)));
+  const vis = await pg.evaluate(() => {
+    const r = document.querySelector('#view3d canvas').getBoundingClientRect();
+    return { w: r.width, h: r.height, stage: getComputedStyle(document.querySelector('#stageCard')).display };
+  });
+  check(label + '：3D の画面が動画と入れ替わる', vis.w > 100 && vis.h > 100 && vis.stage === 'none', Math.round(vis.w) + '×' + Math.round(vis.h));
+  const hmax = await pg.evaluate(() => document.querySelector('.col-main').getBoundingClientRect().height / window.innerHeight);
+  if (label === 'phone') check(label + '：貼り付くブロックが画面の半分以下', hmax <= 0.55, (hmax * 100).toFixed(0) + '%');
+  await shot('6-oblique');
+
+  /* 答え合わせ：半径（円を当てはめない。真の中心からの距離の平均）と Δv の向き */
+  const acc = await pg.evaluate(c => {
+    const C = HG.recon.toWorld(c[0], c[1]);
+    const rad = HG.track3dAll.map(p => Math.hypot(p.x - C.x, p.z - C.z));
+    const mean = rad.reduce((s, v) => s + v, 0) / rad.length;
+    const ang = HG.kin3d.a.map(a => {
+      const tx = C.x - a.at.x, tz = C.z - a.at.z;
+      return Math.abs(Math.atan2(a.d2.x * tz - a.d2.z * tx, a.d2.x * tx + a.d2.z * tz)) * 180 / Math.PI;
+    });
+    return { mean: mean, n: HG.track3d.length, nAll: HG.track3dAll.length, worst: Math.max.apply(null, ang), na: ang.length };
+  }, truth.center_px);
+  const err = Math.abs(acc.mean - truth.R) / truth.R * 100;
+  check(label + '：実際に追跡した点で半径の誤差 3% 以内', err <= 3,
+        (acc.mean * 100).toFixed(2) + ' cm（真値 ' + (truth.R * 100).toFixed(1) + ' cm）誤差 ' + err.toFixed(2) + '%、' + acc.nAll + ' 点');
+  check(label + '：実際に追跡した点で Δv が中心から ±5° 以内', acc.worst <= 5, acc.na + ' 本、最大 ' + acc.worst.toFixed(2) + '°');
+
+  /* 視点を回す（真上） */
+  await pg.click('[data-view=top]');
+  await pg.waitForTimeout(1100);
+  await shot('6-top');
+
+  /* 予測を経てから Δv（教師が ON にしたとき） */
+  await pg.evaluate(() => { document.querySelector('#viewBody details').open = true; });
+  await pg.check('#usePrediction');
+  await pg.check('#lyVel');
+  await pg.click('#lyDv');
+  const gate = await pg.evaluate(() => ({ gate: !document.querySelector('#predGate').classList.contains('hide'),
+    dv: HG.viewer.opts.layers.dv, q: document.querySelector('#predGate .pred-qtext') && document.querySelector('#predGate .pred-qtext').textContent }));
+  check(label + '：Δv の前に予測を聞く（Δv はまだ出ない）', gate.gate && !gate.dv, gate.q || '');
+  const same = await pg.evaluate(() => {
+    const a = HG.presets.byId('circle').predictions[0].options.map(o => o.id + o.label).join();
+    const b = [...document.querySelectorAll('#predGate .pred-opt')].map(e => e.textContent).join();
+    return a === b;
+  });
+  check(label + '：予測の選択肢が 2D の円運動と同じ文言・並び', same);
+  await shot('6-pred');
+  await pg.click('#predGate [data-id=B]');
+  const after = await pg.evaluate(() => ({ dv: HG.viewer.opts.layers.dv, strip: document.querySelector('#predShown').textContent,
+    reveal: !document.querySelector('#revealNote').classList.contains('hide') }));
+  check(label + '：予測のあと Δv が出る／解説はまだ出ない', after.dv && /B/.test(after.strip) && !after.reveal, after.strip);
+  await pg.click('[data-view=oblique]');
+  await pg.waitForTimeout(1100);
+  await shot('6-vectors');
+
+  /* 壁に影を落とす → グラフ */
+  await pg.check('#lyWallBack');
+  await pg.waitForTimeout(200);
+  const g = await pg.evaluate(() => ({ card: !document.querySelector('#graphCard').classList.contains('hide'),
+    reveal: !document.querySelector('#revealNote').classList.contains('hide') }));
+  check(label + '：奥の壁の影 → グラフが出る・解説が出る', g.card && g.reveal);
+  await pg.evaluate(() => { HG.panel3d.setNow(Math.round(HG.track3dAll.length * 0.3)); });
+  await pg.click('[data-view=front]');
+  await pg.waitForTimeout(1100);
+  await shot('6-wall-front');
+  if (SHOTS) {
+    const el = await pg.$('#graphCard');
+    await el.screenshot({ path: path.join(OUT, label + '-6-graph.png') });
+  }
+  await pg.click('[data-view=camera]');
+  await pg.waitForTimeout(1100);
+  await shot('6-camera');
+
+  /* 再生が止められる */
+  await pg.click('#playBtn'); await pg.waitForTimeout(500);
+  const moved = await pg.evaluate(() => +document.querySelector('#nowSlider').value);
+  await pg.click('#playBtn');
+  check(label + '：再生で時刻が進み、止められる', moved >= 0 && /再生/.test(await pg.textContent('#playBtn')));
+
+  /* 使うコマを変えたら 3D が作り直される（selection:changed） */
+  const before = await pg.evaluate(() => HG.track3d.length);
+  await pg.evaluate(() => { const s = document.querySelector('#selCount'); s.value = 5; s.dispatchEvent(new Event('input')); s.dispatchEvent(new Event('change')); });
+  const afterN = await pg.evaluate(() => HG.track3d.length);
+  check(label + '：使う点の数を変えると 3D が作り直される', afterN !== before && afterN >= 4, before + ' → ' + afterN + ' 点');
+
+  /* 動画に戻る */
+  await pg.click('#back2d');
+  const back = await pg.evaluate(() => getComputedStyle(document.querySelector('#stageCard')).display);
+  check(label + '：動画に戻れる', back !== 'none');
+
+  /* 要素 id の配線漏れ（共有モジュールが探す id が 3d.html にあるか） */
+  const missing = await pg.evaluate(() => {
+    const src = [...document.scripts].map(s => s.src).filter(s => /\/js\//.test(s));
+    return Promise.all(src.map(u => fetch(u).then(r => r.text()))).then(txts => {
+      const ids = new Set();
+      txts.forEach(t => { (t.match(/\$\('#([A-Za-z0-9_-]+)'\)/g) || []).forEach(m => ids.add(m.slice(4, -2)));
+                          (t.match(/HG\.dom\.\w+\('#([A-Za-z0-9_-]+)'/g) || []).forEach(m => ids.add(m.replace(/.*'#/, '').replace(/'$/, ''))); });
+      return [...ids].filter(id => !document.getElementById(id));
+    });
+  });
+  check(label + '：スクリプトが探す要素がすべてある', !missing.length, missing.join(', '));
+  check(label + '：エラーなし', !errs.length, errs.slice(0, 3).join(' | '));
+}
+
+(async () => {
+  if (SHOTS) fs.mkdirSync(OUT, { recursive: true });
+  const srv = await serve(ROOT);
+  const b = await launch();
+  for (const [label, vp] of [['phone', { width: 390, height: 844 }], ['pc', { width: 1280, height: 860 }]]) {
+    console.log('[' + label + ' ' + vp.width + '×' + vp.height + ']');
+    const ctx = await b.newContext({ viewport: vp, deviceScaleFactor: 2, hasTouch: false });
+    const pg = await ctx.newPage();
+    pg.__base = srv.url;
+    try { await runFlow(pg, label); } catch (e) { check(label + '：最後まで通る', false, e.message.split('\n')[0]); }
+    await ctx.close();
+  }
+  await b.close(); srv.close();
+  console.log(fails ? '\n' + fails + ' 件失敗' : '\nすべて通りました');
+  process.exit(fails ? 1 : 0);
+})();

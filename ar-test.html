@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AR の確認</title>
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/hg3d.css">
+</head>
+<body>
+<!-- =====================================================================
+     ar-test.html — フェーズ1「AR の確認」（3D仕様.md §6・§8）
+
+     いちばん不確かなものを最初に試す。iPhone の AR Quick Look に
+     「その場で作ったモデル（blob URL）」を渡せるかどうか。
+     通らなければ AR の作り方を変えるので、3d.html に AR ボタンを付けるのは
+     この結果を見てから（3D仕様.md §8 の順序 6）。
+
+     4つの方式を同じモデルで試す。上の2つ（実ファイル）は「その端末で AR が
+     そもそも動くか」の基準。下の2つが本番で使いたい方式。
+     ===================================================================== -->
+<div class="wrap">
+<header>
+  <div class="head-row">
+    <div>
+      <h1>AR の確認（フェーズ1）</h1>
+      <div class="phase">同じモデルを4つの方式で開いて、どれが通るかを確かめます</div>
+    </div>
+    <a class="ghost-link" href="3d.html">3D へ →</a>
+  </div>
+</header>
+
+<div class="card">
+  <h2>この端末</h2>
+  <table class="stat"><tbody id="dev"></tbody></table>
+</div>
+
+<div class="card">
+  <h2>試すモデル</h2>
+  <div class="sub spaced-sm">合成データの等速円運動（半径 20 cm）。床の目盛り（10 cm）・A4 の紙・ストロボの球・速度（緑）・Δv（橙）・軸。
+    <b>AR で、矢印の色（緑と橙）が残っているか</b>も見てください。</div>
+  <div id="preview" class="v3-host spaced"></div>
+  <div class="row tight spaced">
+    <label class="chk"><input type="radio" name="scale" value="1" checked> 実寸（1:1）</label>
+    <label class="chk"><input type="radio" name="scale" value="0.2"> 机上サイズ（1/5）</label>
+  </div>
+  <div class="sub mono spaced-sm" id="sizes"></div>
+</div>
+
+<div class="card ar-case" data-case="file-usdz">
+  <h2>方式1　実ファイルの USDZ（iPhone・iPad）</h2>
+  <div class="sub">サーバーに置いた <span class="mono">ar-test/test.usdz</span> を AR Quick Look で開きます。
+    <b>ここが開かなければ、その端末・ブラウザでは AR Quick Look 自体が使えません。</b></div>
+  <a id="qlStatic" rel="ar" href="ar-test/test.usdz" class="ar-link spaced">
+    <img src="ar-test/thumb.png" alt="" width="64" height="48"><span>AR で開く（実ファイル）</span></a>
+</div>
+
+<div class="card ar-case" data-case="file-glb">
+  <h2>方式2　実ファイルの GLB（Android）</h2>
+  <div class="sub">サーバーに置いた <span class="mono">ar-test/test.glb</span> を Scene Viewer で開きます。
+    Scene Viewer には公開された URL しか渡せないので、本番（その場で作ったモデル）には使えません。基準として試します。</div>
+  <button id="svStatic" class="spaced">AR で開く（Scene Viewer）</button>
+</div>
+
+<div class="card ar-case" data-case="blob-usdz">
+  <h2>方式3　その場で作った USDZ（iPhone・iPad）★本命</h2>
+  <div class="sub">このページの中で USDZ を作り、blob URL のまま AR Quick Look に渡します。
+    <b>3D仕様.md で「かなり怪しい」とした方式です。</b>これが通れば、本番の書き出しはこの形にします。</div>
+  <button id="qlBlob" class="primary spaced">USDZ を作って AR で開く</button>
+  <div class="sub mono spaced-sm" id="qlBlobInfo"></div>
+</div>
+
+<div class="card ar-case" data-case="model-viewer">
+  <h2>方式4　model-viewer に GLB を渡す（両方）</h2>
+  <div class="sub">その場で作った GLB を model-viewer で表示し、右下の AR ボタンで開きます。
+    iPhone では model-viewer が中で USDZ に変換し、Android では WebXR で開きます。初回は 1 MB 読み込みます。</div>
+  <button id="mvLoad" class="spaced">model-viewer を出す</button>
+  <div id="mvHost" class="spaced"></div>
+  <div class="sub mono spaced-sm" id="mvInfo"></div>
+</div>
+
+<div class="card">
+  <h2>結果の控え</h2>
+  <div class="sub spaced-sm">各方式のカードで押した結果がここにまとまります。スクリーンショットか「コピー」で送ってください。</div>
+  <pre id="summary" class="mono summary"></pre>
+  <div class="row tight">
+    <button id="copySum" class="grow">コピー</button>
+    <button id="clearSum" class="ghost">結果を消す</button>
+  </div>
+</div>
+</div>
+
+<script src="vendor/three-bundle.js"></script>
+<script src="js/hg3d/geom.js"></script>
+<script src="js/hg3d/testdata.js"></script>
+<script src="js/hg3d/reconstruct.js"></script>
+<script src="js/hg3d/meshes.js"></script>
+<script src="js/hg3d/content.js"></script>
+<script src="js/hg3d/viewer.js"></script>
+<script src="js/hg3d/ar.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = s => document.querySelector(s);
+
+  /* ---------- 試すモデル：合成データを 3d.html と同じ道で 3D にする ---------- */
+  const d = HG.testdata.circle({ R: 0.20, T: 1.8, dur: 1.8, cam: { dist: 1.5, elev: 40 }, seed: 11 });
+  HG.recon.setCorners(d.corners, 0);
+  HG.recon.solve(d.W, d.H);
+  const sel = d.frames.filter((f, i) => i % 7 === 0).slice(0, 8);
+  const r = HG.recon.computeFrom(sel, d.frames);
+  const data = { track: r.track, trackAll: r.trackAll, kin: r.kin, paper: HG.recon.paperWorld() };
+  const LAYERS = { balls: true, paper: true, grid: true, axes: true, vel: true, dv: true };
+
+  HG.viewer.attach($('#preview'));
+  HG.viewer.setLayers(LAYERS);
+  HG.viewer.setZoom(2);
+  HG.viewer.setData(data);
+  HG.viewer.view('oblique', true);
+  HG.viewer.start();
+  window.addEventListener('resize', () => HG.viewer.fit());
+
+  function scale() { return +document.querySelector('input[name=scale]:checked').value; }
+
+  /** 書き出す場面（ビューアと同じ中身）。ファイル作りの道具からも呼ぶ */
+  async function makeBlobs(sc) {
+    const sceneE = HG.ar.exportScene(HG.viewer.content(), sc || 1);
+    const glb = await HG.ar.toGLB(sceneE);
+    const usdz = await HG.ar.toUSDZ(sceneE);
+    return { glb: glb, usdz: usdz };
+  }
+  /* tools/make-ar-test.js が実ファイルを作るのに使う */
+  window.__makeArFiles = async function () {
+    const b = await makeBlobs(1);
+    const b64 = async blob => {
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      let s = '';
+      for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+      return btoa(s);
+    };
+    /* 描いた直後でないと絵が空になる（preserveDrawingBuffer を切っているため） */
+    const it = HG.viewer._internals();
+    it.renderer.render(it.scene, it.camera);
+    const thumb = it.renderer.domElement.toDataURL('image/png');
+    return { glb: await b64(b.glb), usdz: await b64(b.usdz), thumb: thumb };
+  };
+
+  /* ---------- 端末 ---------- */
+  async function device() {
+    const xr = await HG.ar.webxrSupported();
+    const rows = [
+      ['ブラウザ', navigator.userAgent],
+      ['AR Quick Look', HG.ar.quickLookSupported() ? '<span class="ok">使える</span>' : '使えない（iPhone の Safari 以外）'],
+      ['WebXR（AR）', xr ? '<span class="ok">使える</span>' : '使えない'],
+      ['画面', window.innerWidth + '×' + window.innerHeight + '（dpr ' + (window.devicePixelRatio || 1) + '）']
+    ];
+    $('#dev').innerHTML = rows.map(r => '<tr><td>' + r[0] + '</td><td class="mono">' + r[1] + '</td></tr>').join('');
+    window.__dev = { ua: navigator.userAgent, ql: HG.ar.quickLookSupported(), xr: xr };
+    summary();
+  }
+
+  async function sizes() {
+    const b = await makeBlobs(scale());
+    $('#sizes').textContent = 'GLB ' + (b.glb.size / 1024).toFixed(0) + ' KB ／ USDZ ' + (b.usdz.size / 1024).toFixed(0) + ' KB';
+  }
+
+  /* ---------- 方式 ---------- */
+  $('#svStatic').onclick = () => HG.ar.openSceneViewer(new URL('ar-test/test.glb', location.href).href, 'AR の確認');
+
+  let usdzUrl = null;
+  $('#qlBlob').onclick = async () => {
+    const t0 = performance.now();
+    $('#qlBlobInfo').textContent = '作っています…';
+    try {
+      const b = await makeBlobs(scale());
+      if (usdzUrl) URL.revokeObjectURL(usdzUrl);
+      usdzUrl = URL.createObjectURL(b.usdz);
+      $('#qlBlobInfo').textContent = 'USDZ ' + (b.usdz.size / 1024).toFixed(0) + ' KB を ' +
+        (performance.now() - t0).toFixed(0) + ' ms で作りました。開いています…';
+      HG.ar.openQuickLook(usdzUrl);
+    } catch (e) {
+      $('#qlBlobInfo').textContent = '作れませんでした：' + e.message;
+    }
+  };
+
+  $('#mvLoad').onclick = async () => {
+    $('#mvInfo').textContent = 'model-viewer を読み込んでいます…';
+    try {
+      const b = await makeBlobs(scale());
+      const mv = await HG.ar.modelViewer($('#mvHost'), URL.createObjectURL(b.glb), { height: '300px' });
+      mv.addEventListener('ar-status', e => { $('#mvInfo').textContent = 'ar-status: ' + e.detail.status; });
+      setTimeout(() => {
+        $('#mvInfo').textContent = 'canActivateAR = ' + mv.canActivateAR +
+          '（false なら、この端末では model-viewer の AR ボタンは出ません）';
+      }, 1500);
+    } catch (e) {
+      $('#mvInfo').textContent = '読み込めませんでした：' + e.message;
+    }
+  };
+
+  document.querySelectorAll('input[name=scale]').forEach(r => r.onchange = sizes);
+
+  /* ---------- 結果の記録（この端末のこのブラウザにだけ残る） ---------- */
+  const KEY = 'hg3d-ar-test';
+  const CHOICES = [['ok', '開いた'], ['odd', '開いたが色・形が変'], ['ng', '開かない']];
+  function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } }
+  function save(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) { /* 残せなくても動く */ } }
+  const res = load();
+
+  document.querySelectorAll('.ar-case').forEach(card => {
+    const id = card.dataset.case;
+    const row = document.createElement('div');
+    row.className = 'row tight spaced ar-result';
+    row.innerHTML = '<span class="sub">結果：</span>' + CHOICES.map(c =>
+      '<button data-v="' + c[0] + '" class="' + (res[id] === c[0] ? 'picked' : '') + '">' + c[1] + '</button>').join('');
+    row.onclick = e => {
+      const b = e.target.closest('button[data-v]');
+      if (!b) return;
+      res[id] = b.dataset.v; save(res);
+      row.querySelectorAll('button').forEach(x => x.classList.toggle('picked', x === b));
+      summary();
+    };
+    card.appendChild(row);
+  });
+
+  function summary() {
+    const name = { 'file-usdz': '方式1 実ファイルUSDZ', 'file-glb': '方式2 実ファイルGLB',
+                   'blob-usdz': '方式3 その場のUSDZ', 'model-viewer': '方式4 model-viewer' };
+    const label = v => (CHOICES.filter(c => c[0] === v)[0] || [0, '未'])[1];
+    const dv = window.__dev || {};
+    $('#summary').textContent = [
+      'AR の確認 ' + new Date().toISOString().slice(0, 10),
+      'UA: ' + (dv.ua || navigator.userAgent),
+      'Quick Look: ' + (dv.ql ? 'あり' : 'なし') + ' ／ WebXR: ' + (dv.xr ? 'あり' : 'なし')
+    ].concat(Object.keys(name).map(k => name[k] + '：' + label(res[k]))).join('\n');
+  }
+  $('#copySum').onclick = () => {
+    const t = $('#summary').textContent;
+    if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => { $('#copySum').textContent = 'コピーしました'; });
+  };
+  $('#clearSum').onclick = () => {
+    Object.keys(res).forEach(k => delete res[k]); save(res);
+    document.querySelectorAll('.ar-result button').forEach(b => b.classList.remove('picked'));
+    summary();
+  };
+
+  device();
+  sizes();
+})();
+</script>
+</body>
+</html>

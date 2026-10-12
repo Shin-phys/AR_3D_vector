@@ -1,0 +1,76 @@
+/* base.css — 配色トークン・リセット・共通部品
+   画面固有のレイアウトは app.css に書くこと */
+:root{
+  --bg:#f6f7f9; --card:#fff; --ink:#12161c; --sub:#5b6572;
+  --line:#dfe3e8; --accent:#0b6bcb; --accent-ink:#fff;
+  --warn:#c0392b; --ok:#1b7f4b; --mark:#ff2d6f;
+  --radius:12px;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  background:var(--bg); color:var(--ink);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding:0 12px 40px; overscroll-behavior-y:contain;
+}
+.wrap{max-width:900px; margin:0 auto;}
+
+/* --- 部品 --- */
+.card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:12px; margin-bottom:12px;}
+.card h2{font-size:14px; margin:0 0 8px; color:var(--sub); font-weight:600; letter-spacing:.04em;}
+button{
+  font:inherit; font-weight:600; color:var(--ink); background:#fff;
+  border:1px solid var(--line); border-radius:10px; min-height:44px; padding:0 14px; cursor:pointer;
+}
+button:active{background:#eef1f5;}
+button.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+button.ghost{background:transparent;}
+button:disabled{opacity:.4; cursor:default;}
+input[type=number]{font:inherit; width:64px; min-height:40px; border:1px solid var(--line); border-radius:8px; padding:0 8px;}
+label.chk{display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--sub);}
+details{border-top:1px solid var(--line); padding-top:10px; margin-top:10px;}
+summary{cursor:pointer; font-weight:600; font-size:14px;}
+details ul{margin:8px 0 0 -8px; padding-left:20px;}
+details li{margin:4px 0; font-size:13px; color:var(--sub);}
+details li b{color:var(--ink);}
+.bar{height:8px; background:#e6e9ee; border-radius:5px; overflow:hidden;}
+.bar>i{display:block; height:100%; background:var(--accent); width:0;}
+.pill{display:inline-block; padding:2px 8px; border-radius:999px; background:#eef1f5; font-size:12px; color:var(--sub);}
+table.stat{width:100%; border-collapse:collapse; font-size:13px;}
+table.stat td{padding:3px 0; vertical-align:top;}
+table.stat td:first-child{color:var(--sub); width:9.5em;}
+
+/* --- レイアウト用ユーティリティ --- */
+.row{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+.row.tight{gap:6px;}
+.row.between{justify-content:space-between;}
+.grow{flex:1 1 auto;}
+.spaced{margin-top:8px;}
+.spaced-sm{margin-top:6px;}
+.hide{display:none !important;}
+
+/* --- 文字 --- */
+.mono{font-variant-numeric:tabular-nums; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+.sub{color:var(--sub); font-size:13px;}
+.lead{font-weight:600; font-size:14px;}
+.warn{color:var(--warn); font-weight:600;}
+.ok{color:var(--ok); font-weight:600;}
+
+/* --- スライダ（閾値の調整。指で動かす前提で太めに） --- */
+.slider{margin:6px 0 10px;}
+.slider label{display:flex; justify-content:space-between; font-size:13px; color:var(--sub); margin-bottom:2px;}
+input[type=range]{width:100%; height:32px; accent-color:var(--accent); background:transparent;}
+.chip{display:inline-block; width:22px; height:22px; border-radius:6px; border:1px solid var(--line); vertical-align:middle;}
+select{font:inherit; min-height:44px; border:1px solid var(--line); border-radius:10px;
+        padding:0 10px; background:#fff; color:var(--ink);}
+
+/* --- 作図のステップ表示 --- */
+.chips{display:flex; gap:5px; flex-wrap:wrap;}
+.chip-step{font-size:12px; padding:4px 9px; border-radius:999px; background:#eef1f5; color:var(--sub); border:1px solid transparent;}
+.chip-step.now{background:var(--accent); color:#fff; font-weight:700;}
+.chip-step.ok{background:#e6f4ec; color:var(--ok); border-color:#bde0cd;}
+.chip-step.back{cursor:pointer; text-decoration:underline dotted;}
+
+/* 作図中は他のカードを畳む。390px の縦画面では、キャンバスと操作ボタンが
+   離れているとスクロールしながら描くことになり実用にならない */
+body.drawing .card-tool{display:none;}

@@ -1,0 +1,31 @@
+# 共有モジュールの出所（tools/sync-shared.sh が書く。手で直さない）
+source: Hodograph
+commit: 2f9f53a 引き継ぎ文書を追加（docs/引き継ぎ.md）
+synced: 2026-10-13 06:21
+files:
+  css/base.css  75438c18c8ad
+  css/app.css  c3d390273ece
+  js/core/state.js  3fb47f3f576f
+  js/core/bus.js  4dd5ae97e12c
+  js/core/coords.js  ea9f73723cf0
+  js/core/points.js  7831341b96a1
+  js/core/wakelock.js  d8180eb91d49
+  js/ui/dom.js  8e12d893943b
+  js/presets/presets.js  c2d41d7ab7cf
+  js/analysis/color.js  7480e18b78f2
+  js/analysis/blob.js  43a98a5ebd4a
+  js/analysis/diagnostics.js  4987c81f9475
+  js/video/frames.js  15c0e4a4e7b9
+  js/video/scanner.js  edf8d240e9aa
+  js/video/loader.js  25440f5b9473
+  js/video/tracker.js  67061903933d
+  js/ui/stage.js  5e3d1050a1ea
+  js/ui/arrows.js  e7189bcfb781
+  js/ui/overlay.js  0cde990b86eb
+  js/ui/timeline.js  72be6e82127a
+  js/ui/loupe.js  4f3f2ad53421
+  js/ui/pointer.js  fcdc1ba7eaf7
+  js/ui/controls.js  bd4e90a674b2
+  js/ui/track-controls.js  95531fe11dce
+  js/ui/selection.js  a0738878f875
+  js/io/exporter.js  7042b07aec71
