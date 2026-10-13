@@ -18,7 +18,9 @@
     pos: '#0b6bcb', vel: '#12a150', dv: '#ff7a00',
     ball: '#ff2d6f', ballNow: '#ffd400',
     grid: '#c9ced6', gridMain: '#9aa3ae', paper: '#ffffff', paperEdge: '#5b6572',
-    axisX: '#d64545', axisY: '#2f9e44', axisZ: '#1c64d9',
+    /* ★ 軸は色を付けない（濃い灰色）。★ 赤の x 軸が AR の光の下で Δv の橙と見分けられず、
+       緑の y 軸も速度の緑と同じだった（実機）。色は矢印（位置・速度・Δv）だけに使う */
+    axisX: '#4a5260', axisY: '#4a5260', axisZ: '#4a5260',
     shadow: '#3b4250', wall: '#e9edf2'
   };
 

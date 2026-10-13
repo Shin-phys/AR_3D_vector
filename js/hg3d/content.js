@@ -84,7 +84,7 @@
 
     /* 軸（原点＝紙の角 A）。ラベルはビューアが HTML で重ねる（AR には文字を入れない） */
     if (L.axes !== false) {
-      const a = axisLen(ext), r = s.arrow * 0.8;
+      const a = axisLen(ext), r = s.arrow * 0.55;   // ベクトルより細く（主役は矢印）
       g.add(M.arrow({ x: 0, y: 0, z: 0 }, { x: a, y: 0, z: 0 }, C.axisX, r));
       g.add(M.arrow({ x: 0, y: 0, z: 0 }, { x: 0, y: a, z: 0 }, C.axisY, r));
       g.add(M.arrow({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: a }, C.axisZ, r));

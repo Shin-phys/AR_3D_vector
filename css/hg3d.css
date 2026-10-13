@@ -11,9 +11,9 @@
           padding:1px 5px; border-radius:5px; background:rgba(255,255,255,.82); color:var(--ink);
           margin:-9px 0 0 4px;}
 /* 3本の軸の先で重ならないよう、向きごとに逃がす */
-.v3-label.ax-x{color:#b42323; margin:-9px 0 0 6px;}
-.v3-label.ax-y{color:#1f7a33; margin:-24px 0 0 -18px;}
-.v3-label.ax-z{color:#1c4fb0; margin:4px 0 0 -10px;}
+.v3-label.ax-x{margin:-9px 0 0 6px;}
+.v3-label.ax-y{margin:-24px 0 0 -18px;}
+.v3-label.ax-z{margin:4px 0 0 -10px;}
 .v3-label.wall{color:var(--sub); background:rgba(255,255,255,.6);}
 /* 3D の中の「いま」の時刻（コマ番号と同じく画面に重ねる。高さを食わない） */
 #v3Tag{position:absolute; left:8px; bottom:8px; z-index:4; background:rgba(0,0,0,.55); color:#fff;
