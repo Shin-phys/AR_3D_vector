@@ -25,8 +25,10 @@
       side:  { key: 'y', color: '#7c3aed', name: '横の壁の影（y：鉛直・上）' }
     }
   };
+  /* 2台のカメラ：机の上と同じ（奥の壁は x、横の壁は z）。床の影は x と z の両方が動くのでグラフにしない */
+  SERIES_BY_PLANE.stereo = SERIES_BY_PLANE.horizontal;
   let SERIES = SERIES_BY_PLANE.horizontal;
-  function setPlane(p) { SERIES = SERIES_BY_PLANE[p === 'vertical' ? 'vertical' : 'horizontal']; }
+  function setPlane(p) { SERIES = SERIES_BY_PLANE[p] || SERIES_BY_PLANE.horizontal; }
   const PAD = { l: 46, r: 12, t: 12, b: 30 };
 
   function attach(canvas, scrub) {

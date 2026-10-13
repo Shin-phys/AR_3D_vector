@@ -24,7 +24,7 @@
 
   /** 大きさの目安（球の半径や矢印の太さを、運動の大きさに合わせる） */
   function extent(data) {
-    const pts = [].concat(data.track || [], data.trackAll || [], data.paper || []);
+    const pts = [].concat(data.track || [], data.trackAll || [], data.paper || [], ...(data.papers || []));
     if (!pts.length) return null;
     const b = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity, z0: Infinity, z1: -Infinity };
     pts.forEach(p => {
@@ -79,12 +79,16 @@
     const ext = extent(data);
     if (!ext) return { group: g, ext: null };
     const vertical = data.plane === 'vertical';
+    /* 2台のカメラ（ステレオ）：運動は面に乗っていない。床にも影を落とせる */
+    const free = data.plane === 'stereo';
     const s = sizes(ext.S), st = stage(ext, data.plane);
 
     /* 床（目盛りと紙）。球の半径だけ下げて描く（このファイルの冒頭を参照） */
     const floor = new THREE.Group();
     if (L.grid !== false) floor.add(M.grid(st.x0, st.x1, st.z0, st.z1, 0, st.step, s.grid));
     if (!vertical && L.paper !== false && data.paper) floor.add(M.paper(data.paper, s.grid * 1.3));
+    /* L字の基準（机の紙と立てた紙）。床と同じだけ下げる（立てた紙の下の辺が床に着くように） */
+    if (L.paper !== false && data.papers) data.papers.forEach(q => floor.add(M.paper(q, s.grid * 1.3)));
     floor.position.y = st.floorY;
     g.add(floor);
     /* 鉛直な面：紙はボードに貼ってあるので床ではなく奥に立てる。球が埋まらないよう球の半径だけ奥へ。
@@ -150,8 +154,8 @@
       tr.forEach(p => g.add(M.disc({ x: st.wallSide + 0.002, y: p.y, z: p.z }, s.ball * 0.9, 'x', C.shadow, 0.75)));
       surf.push({ put: p => ({ x: st.wallSide + 0.004, y: p.y, z: p.z }), flat: v => ({ x: 0, y: v.y, z: v.z }) });
     }
-    /* 床の影（真上からの光）。机の上の運動では運動そのものと重なるので、鉛直な面のときだけ */
-    if (L.floor && vertical) {
+    /* 床の影（真上からの光）。机の上の運動では運動そのものと重なるので、鉛直な面と2台のカメラのときだけ */
+    if (L.floor && (vertical || free)) {
       tr.forEach(p => g.add(M.disc({ x: p.x, y: st.floorY + 0.002, z: p.z }, s.ball * 0.9, 'y', C.shadow, 0.75)));
       surf.push({ put: p => ({ x: p.x, y: st.floorY + 0.004, z: p.z }), flat: v => ({ x: v.x, y: 0, z: v.z }) });
     }
@@ -197,7 +201,7 @@
       o.rayS = named(unitRod(), 'HGANIM_rayS');
       o.parts.push(o.shS, o.rayS);
     }
-    if (layers.floor && built.plane === 'vertical') {
+    if (layers.floor && (built.plane === 'vertical' || built.plane === 'stereo')) {
       o.shF = named(M.disc({ x: 0, y: 0, z: 0 }, s.ball * 1.1, 'y', '#12161c', 0.95), 'HGANIM_shF');
       o.rayF = named(unitRod(), 'HGANIM_rayF');
       o.parts.push(o.shF, o.rayF);

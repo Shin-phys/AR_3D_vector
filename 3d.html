@@ -47,7 +47,8 @@
 
   <div class="card">
     <div id="drop">
-      <div class="drop-title">運動を撮影した動画を読み込む</div>
+      <div class="drop-title" id="dropTitle">運動を撮影した動画を読み込む</div>
+      <div class="sub spaced-sm hide" id="stereoLoadNote"></div>
       <button class="primary" id="pick">動画を選ぶ</button>
       <input type="file" id="file" accept="video/*">
       <div class="sub drop-note">ここにドラッグ＆ドロップもできます／動画は端末の外に出ません</div>
@@ -181,9 +182,12 @@
       <button id="cornerStart" class="primary grow">四隅を押す</button>
       <button id="cornerRedo" class="ghost hide">消す</button>
     </div>
+    <!-- 「決定／やめる」の行。2台のカメラのときは基準のカード（#refPickSlot）へ移す（stereo-ui.js） -->
+    <div id="cornerPickSlot">
     <div class="row tight spaced hide" id="cornerPickRow">
       <button id="cornerDecide" class="primary grow">1つ目の角を決定</button>
       <button id="cornerCancel" class="ghost">やめる</button>
+    </div>
     </div>
     <div class="sub spaced" id="cornerInfo"></div>
     <button id="cornerSwap" class="ghost hide spaced">長い辺と短い辺を入れ替える</button>
@@ -199,6 +203,41 @@
       </div>
       <div class="sub spaced-sm" id="plumbInfo"></div>
     </div>
+  </div>
+
+  <!-- 2台のカメラ（ステレオ）の基準：L字の角6つ。四隅のカードの代わりに出す -->
+  <div class="card card-tool hide" id="refCard">
+    <h2>2. 基準の6点を押す（L字）</h2>
+    <div class="corner-guide">
+      <svg width="100" height="74" viewBox="0 0 100 74" aria-hidden="true">
+        <polygon points="16,8 80,8 86,40 10,40" fill="#fff" stroke="#5b6572" stroke-width="1.5"/>
+        <polygon points="10,40 86,40 95,66 5,66" fill="#fff" stroke="#5b6572" stroke-width="1.5"/>
+        <path d="M10,40 L86,40" stroke="#ffb400" stroke-width="3"/>
+        <g font-size="10" font-weight="700" fill="#12161c" text-anchor="middle">
+          <circle cx="16" cy="8" r="6.5" fill="#ffd400"/><text x="16" y="11.5">1</text>
+          <circle cx="80" cy="8" r="6.5" fill="#ffd400"/><text x="80" y="11.5">2</text>
+          <circle cx="86" cy="40" r="6.5" fill="#ffd400"/><text x="86" y="43.5">3</text>
+          <circle cx="94" cy="66" r="6.5" fill="#ffd400"/><text x="94" y="69.5">4</text>
+          <circle cx="6" cy="66" r="6.5" fill="#ffd400"/><text x="6" y="69.5">5</text>
+          <circle cx="10" cy="40" r="6.5" fill="#ffd400"/><text x="10" y="43.5">6</text>
+        </g>
+      </svg>
+      <div class="sub">机に置いた紙と、その奥の辺に立てた紙の角を、<b>立てた紙の左上から時計回り</b>に6つ押します。
+        3 と 6 は2枚の境目（折り目）の両端です。</div>
+    </div>
+    <div class="row tight spaced">
+      <span class="sub">紙</span>
+      <select id="refSel" class="grow">
+        <option value="A4" selected>A4 を横に 2枚（29.7 × 21.0 cm）</option>
+        <option value="A3">A3 を横に 2枚（42.0 × 29.7 cm）</option>
+      </select>
+    </div>
+    <div class="row tight spaced">
+      <button id="refStart" class="primary grow">6点を押す</button>
+      <button id="refRedo" class="ghost hide">消す</button>
+    </div>
+    <div id="refPickSlot"></div>
+    <div class="sub spaced" id="refInfo"></div>
   </div>
 
   <div class="card card-tool" id="markCard">
@@ -304,8 +343,37 @@
   </details>
 
 
+  <!-- 2台のカメラ（ステレオ）：カメラ①を記録して②へ。②では2台を合わせる（stereo-ui.js） -->
+  <div class="card card-tool hide" id="stereoCard">
+    <h2>5. 2台目と合わせる</h2>
+    <div class="sub" id="stCams"></div>
+    <div id="stStage1" class="spaced">
+      <div class="sub spaced-sm">この動画（カメラ①）の 1〜4 が済んだら、記録して、もう1台の動画へ進みます。
+        記録したあとは、この動画には戻れません（やり直すときは ← ホーム）。</div>
+      <div class="sub spaced-sm">カメラ①の区間（ステップ1）は<b>広めに</b>取っておきます。使う区間（たとえば1周ぶん）は、カメラ②のほうで決めます。</div>
+      <div class="row tight spaced-sm">
+        <button id="stCommit" class="primary grow" disabled>カメラ①を記録して、カメラ②の動画へ</button>
+      </div>
+    </div>
+    <div id="stStage2" class="spaced hide">
+      <div class="sub spaced-sm">2本の動画の時刻と、2台のカメラの位置・向きを合わせます。
+        手拍子の音で大まかに合わせ、2台から引いた線が最もよく交わるところへ細かく合わせます。</div>
+      <div class="row tight spaced-sm">
+        <button id="stSync" class="primary grow" disabled>2台を合わせる</button>
+      </div>
+      <div class="row tight spaced-sm hide" id="stNudge">
+        <button data-nudge="-1" data-frame="1">◀ 1コマ</button>
+        <button data-nudge="-0.01">◀ 10 ms</button>
+        <button data-nudge="0.01">10 ms ▶</button>
+        <button data-nudge="1" data-frame="1">1コマ ▶</button>
+      </div>
+      <div class="sub spaced" id="stSyncInfo"></div>
+    </div>
+    <div class="sub spaced" id="stInfo"></div>
+  </div>
+
   <div class="card card-tool" id="selectCard">
-    <h2>5. 使うコマを決める（等間隔）</h2>
+    <h2 id="selectTitle">5. 使うコマを決める（等間隔）</h2>
     <div class="slider">
       <label>使う点の数 <span class="mono" id="selCountVal">7 点</span></label>
       <input type="range" id="selCount" min="3" max="20" value="7">
@@ -336,7 +404,7 @@
 
 
   <div class="card" id="viewCard">
-    <h2>6. 3D で見る</h2>
+    <h2 id="viewTitle">6. 3D で見る</h2>
     <div class="sub spaced-sm" id="viewHint">四隅と座標がそろったら「3D で見る」を押してください。</div>
     <div class="row tight spaced">
       <button id="open3d" class="primary grow">3D で見る</button>
@@ -360,7 +428,7 @@
         <label class="chk"><input type="checkbox" id="lyBalls" checked> <span class="sw" style="background:#ff2d6f"></span> ストロボ（球）</label>
         <label class="chk"><input type="checkbox" id="lyPaper" checked> 紙と床の目盛り</label>
         <label class="chk"><input type="checkbox" id="lyPhoto"> 実物の写真で表示</label>
-        <label class="chk"><input type="checkbox" id="lyPos"> <span class="sw" style="background:#0b6bcb"></span> 位置（紙の角 A から）</label>
+        <label class="chk"><input type="checkbox" id="lyPos"> <span class="sw" style="background:#0b6bcb"></span> <span id="lyPosText">位置（紙の角 A から）</span></label>
         <label class="chk"><input type="checkbox" id="lyVel"> <span class="sw" style="background:#12a150"></span> 速度</label>
         <label class="chk"><input type="checkbox" id="lyDv"> <span class="sw" style="background:#ff7a00"></span> Δv（加速度）</label>
       </div>
@@ -493,6 +561,7 @@
 <script src="vendor/three-bundle.js"></script>
 <script src="js/hg3d/geom.js"></script>
 <script src="js/hg3d/reconstruct.js"></script>
+<script src="js/hg3d/stereo.js"></script>
 <script src="js/hg3d/testdata.js"></script>
 <script src="js/hg3d/meshes.js"></script>
 <script src="js/hg3d/photo.js"></script>
@@ -505,6 +574,7 @@
 <script src="js/hg3d/steps3d.js"></script>
 <script src="js/hg3d/corners.js"></script>
 <script src="js/hg3d/panel3d.js"></script>
+<script src="js/hg3d/stereo-ui.js"></script>
 <script src="js/hg3d/main3d.js"></script>
 </body>
 </html>

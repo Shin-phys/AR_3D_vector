@@ -129,7 +129,10 @@
     return { ok: true };
   }
 
-  function setPlane(p) { S.plane = p === 'vertical' ? 'vertical' : 'horizontal'; }
+  /* 'stereo'（2台のカメラ）のときは、このファイルの計算は使わず stereo-ui.js に任せる
+     （ready / compute / cameraWorld は下で受け渡す）。紙の四隅も糸も使わない */
+  function setPlane(p) { S.plane = p === 'vertical' ? 'vertical' : p === 'stereo' ? 'stereo' : 'horizontal'; }
+  function stereo() { return S.plane === 'stereo' && HG.stereo; }
   function setPlumb(list, frameIndex) {
     S.plumb = (list || []).map(p => ({ x: p.x, y: p.y }));
     S.plumbFrame = list && list.length ? frameIndex : null;
@@ -142,7 +145,7 @@
   function clearCorners() {
     S.corners = []; S.cornerFrame = null; S.H = S.Hinv = S.pose = null; S.down = S.right = null;
   }
-  function ready() { return !!S.Hinv; }
+  function ready() { return stereo() ? HG.stereo.ready() : !!S.Hinv; }
 
   /** 回す前の 3D：x = X、z = s·Y、y = 法線方向の高さ（カメラ側が上） */
   function raw0(a, b, c) { return { x: a, y: -S.s * c, z: S.s * b }; }
@@ -178,12 +181,13 @@
 
   /** 糸の2点（3D）。描くため */
   function plumbWorld() {
-    if (S.plumb.length !== 2 || !S.Hinv) return null;
+    if (stereo() || S.plumb.length !== 2 || !S.Hinv) return null;
     return corrected(S.plumb, S.plumbFrame).map(p => toWorld(p.x, p.y));
   }
 
   /** 紙の四隅（3D） */
   function paperWorld() {
+    if (stereo()) return null;
     const w = S.paper.w, h = S.paper.h;
     return [[0, 0], [w, 0], [w, h], [0, h]].map(p => planeToWorld(p[0], p[1], 0));
   }
@@ -193,6 +197,7 @@
    * f は標準カメラの画角で置いている（geom.js の「カメラの姿勢」）。おおよその視点。
    */
   function cameraWorld() {
+    if (stereo()) return HG.stereo.cameraWorld();
     if (!S.pose) return null;
     const P = S.pose, R = P.R;
     const row = i => [R[0][i], R[1][i], R[2][i]];      // カメラの軸を紙の座標で
@@ -215,6 +220,11 @@
     const P = f => { const w = toWorld(f.x, f.y); return { index: f.index, t: f.t, x: w.x, y: w.y, z: w.z }; };
     const track = sel.map(P);
     const trackAll = all.map(P);
+    return { track: track, trackAll: trackAll, kin: kinematics(track) };
+  }
+
+  /** 位置の列（時間順）→ 速度と Δv。2台のカメラ（stereo.js）も同じものを使う */
+  function kinematics(track) {
     const v = [], a = [];
     for (let k = 0; k + 1 < track.length; k++) {
       const p = track[k], q = track[k + 1], dt = q.t - p.t;
@@ -237,11 +247,12 @@
       a.push({ k: k, t: track[k + 1].t, at: track[k + 1], d2: d2, dv: dv, dt: dt,
                ax: dv.x / dt, ay: dv.y / dt, az: dv.z / dt });
     }
-    return { track: track, trackAll: trackAll, kin: { v: v, a: a } };
+    return { v: v, a: a };
   }
 
   /** state から作り直す。ビューアを描く前に呼ぶ */
   function compute() {
+    if (stereo()) return HG.stereo.compute();
     HG.track3d = []; HG.track3dAll = []; HG.kin3d = { v: [], a: [] };
     if (!ready()) return false;
     const sel = HG.selection.list().filter(f => f.found);
@@ -270,6 +281,6 @@
   }
 
   HG.recon = { state: S, PAPERS, setCorners, clearCorners, solve, setPlane, setPlumb, plumbWorld, ready, toWorld,
-               planeToWorld, paperWorld, cameraWorld, computeFrom, compute,
+               planeToWorld, paperWorld, cameraWorld, computeFrom, kinematics, compute,
                correctedCorners, precision };
 })(typeof window !== 'undefined' ? (window.HG = window.HG || {}) : (globalThis.HG = globalThis.HG || {}));

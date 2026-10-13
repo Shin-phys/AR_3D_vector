@@ -17,6 +17,9 @@ const path = require('path');
 const { launch, serve, ROOT } = require('./pw.js');
 
 const SHOTS = process.argv.includes('--shots');
+/* --only=stereo などで1つの流れだけ（開発中に速く回すため） */
+const ONLY = (process.argv.find(a => a.startsWith('--only=')) || '').slice(7);
+const run = name => !ONLY || ONLY === name;
 const OUT = path.join(__dirname, 'out');
 const truth = JSON.parse(fs.readFileSync(path.join(ROOT, 'samples/turntable.json'), 'utf8'));
 let fails = 0;
@@ -47,7 +50,7 @@ async function runFlow(pg, label) {
 
   await pg.goto(pg.__base + '3d.html');
   const tiles = await pg.$$eval('#tiles .tile', b => b.map(x => ({ id: x.dataset.id, dis: x.disabled })));
-  check(label + '：タイル4枚（準備中1枚は押せない）', tiles.length === 4 && tiles.filter(t => t.dis).length === 1,
+  check(label + '：タイル5枚（どれも押せる）', tiles.length === 5 && tiles.filter(t => t.dis).length === 0,
         tiles.map(t => t.id + (t.dis ? '(準備中)' : '')).join(' '));
   await shot('0-tiles');
   await pg.click('[data-id=turntable]');
@@ -323,6 +326,129 @@ async function throwFlow(pg, label) {
   check(label + '：エラーなし', !errs.length, errs.slice(0, 3).join(' | '));
 }
 
+/* ===== 2台のカメラ（ステレオ）：円錐振り子 =====
+   お手本2本（合成・音つき。答えは samples/stereo.json）を1本ずつ読み込み、
+   どちらも 区間 → 6点 → 色 → 追跡 → はい、カメラ①は「記録」、カメラ②は「2台を合わせる」。 */
+const truthS = JSON.parse(fs.readFileSync(path.join(ROOT, 'samples/stereo.json'), 'utf8'));
+async function stereoFlow(pg, label) {
+  const errs = [];
+  pg.on('pageerror', e => errs.push(e.message));
+  pg.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errs.push(m.text()); });
+  pg.on('response', r => { if (r.status() >= 400 && !/favicon/.test(r.url())) errs.push(r.status() + ' ' + r.url()); });
+  const shot = async name => { if (SHOTS) await pg.screenshot({ path: path.join(OUT, label + '-' + name + '.png'), fullPage: false }); };
+  await pg.goto(pg.__base + '3d.html');
+  await pg.click('[data-id=conical]');
+  const st0 = await pg.evaluate(() => ({ plane: HG.recon.state.plane, title: document.querySelector('#dropTitle').textContent }));
+  check(label + '：円錐振り子のタイルで「2台のカメラ」になる', st0.plane === 'stereo' && /カメラ①/.test(st0.title), st0.title);
+  await shot('s0-load1');
+
+  for (const k of [0, 1]) {
+    const cam = truthS.cams[k], no = k ? '②' : '①';
+    await pg.click('#sampleBtn');
+    await pg.waitForSelector('#screen2:not(.hide)', { timeout: 60000 });
+    await pg.waitForFunction(() => HG.state.frames.length > 60 && HG.state.frames.every(f => typeof f.t === 'number'));
+    if (k === 0) {
+      const ui = await pg.evaluate(() => ({ ref: !document.querySelector('#refCard').classList.contains('hide'),
+        corner: !document.querySelector('#cornerCard').classList.contains('hide'),
+        steps: document.querySelectorAll('#stepNav .step').length, tag: (document.querySelector('#stepNav .cam-tag') || {}).textContent }));
+      check(label + '：ステレオではステップが7つ・基準は6点のカード・帯に「カメラ①」', ui.ref && !ui.corner && ui.steps === 7 && ui.tag === 'カメラ①',
+            ui.steps + ' 段、' + ui.tag);
+    }
+    /* 1 区間：カメラ①は全体（広め）。カメラ②は、①と重なる中で1周の少し手前まで */
+    const [i0, i1] = await pg.evaluate(([k, T]) => {
+      const fr = HG.state.frames;
+      if (!k) return [0, fr.length - 1];
+      const at = t => fr.reduce((m, f, i) => Math.abs(f.t - t) < Math.abs(fr[m].t - t) ? i : m, 0);
+      return [at(1.0), at(1.0 + T - 0.08)];
+    }, [k, truthS.T]);
+    await pg.evaluate(i => HG.frames.showFrame(i), i0); await pg.click('#setIn');
+    await pg.evaluate(i => HG.frames.showFrame(i), i1); await pg.click('#setOut');
+    await pg.evaluate(() => HG.frames.showFrame(0));
+    await pg.waitForFunction(() => HG.ui.current === 0);
+    /* 2 基準の6点（立てた紙の左上から時計回り） */
+    await pg.click('#refStart'); await pg.waitForTimeout(800);
+    for (let i = 0; i < 6; i++) { const c = cam.taps[i]; await tapAt(pg, c[0], c[1], i === 0); await pg.click('#cornerDecide'); }
+    const cal = await pg.evaluate(() => { const c = HG.stereo.state.calib; return c ? { ok: c.ok, err: c.err, f: c.f, fov: c.fovX } : null; });
+    check(label + '：カメラ' + no + ' 6点からカメラが決まる', cal && cal.ok && await pg.evaluate(() => HG.steps.done(2)),
+          cal ? '写し戻しのずれ ' + cal.err.toFixed(2) + ' px、横の画角 ' + cal.fov.toFixed(1) + '°（真値 69°）' : 'なし');
+    await shot('s2-ref' + (k + 1));
+    /* 3 色 → 4 追跡 → はい */
+    await pg.click('#pickColor');
+    await tapAt(pg, cam.ball_t0[0], cam.ball_t0[1]);
+    await pg.click('#pickDecide');
+    await pg.click('#runTrack');
+    await pg.waitForSelector('#trackAskRow:not(.hide)', { timeout: 60000 });
+    const rep = await pg.evaluate(() => HG.state.tracking.report);
+    check(label + '：カメラ' + no + ' 自動追跡（見失い 2 コマ以下）', rep && rep.lost.length <= 2, rep ? rep.tracked + '/' + rep.total : '');
+    await pg.click('#trackOk');
+    await pg.waitForFunction(() => HG.stereo.state.clapState !== 'busy', null, { timeout: 20000 });
+    const cl = await pg.evaluate(() => ({ t: HG.stereo.state.clap, s: HG.stereo.state.clapState, cur: HG.steps.current() }));
+    const want = cam.clapVideoT + cam.lag;
+    check(label + '：カメラ' + no + ' 手拍子の音を見つける（±10 ms）', cl.s === 'ok' && Math.abs(cl.t - want) < 0.01,
+          cl.s + ' ' + (cl.t === null ? '' : cl.t.toFixed(3) + ' s（音の入った時刻 ' + want.toFixed(3) + ' s）'));
+    check(label + '：カメラ' + no + ' 追跡のあと、ステップ5（2台）へ', cl.cur === 5);
+    if (k === 0) {
+      check(label + '：カメラ①のあいだは 6・7 へ進めない', !(await pg.evaluate(() => HG.steps.done(6) || HG.steps.done(7))));
+      await shot('s5-commit');
+      await pg.click('#stCommit');
+      await pg.waitForSelector('#screen1:not(.hide)');
+      const t2 = await pg.evaluate(() => ({ title: document.querySelector('#dropTitle').textContent, cam: HG.stereo.camNo(),
+        note: document.querySelector('#stereoLoadNote').textContent }));
+      check(label + '：カメラ①を記録して、カメラ②の読み込みへ', t2.cam === 2 && /カメラ②/.test(t2.title) && /記録しました/.test(t2.note), t2.title);
+      await shot('s0-load2');
+    }
+  }
+  /* 5 2台を合わせる */
+  await pg.click('#stSync');
+  await pg.waitForFunction(() => HG.stereo.ready(), null, { timeout: 30000 });
+  const sy = await pg.evaluate(() => { const p = HG.stereo.state.pair; return { off: p.off, gap: p.gap, src: p.src, angle: p.angle, f1: p.cam1.fovX, f2: p.cam2.fovX,
+    info: document.querySelector('#stSyncInfo').textContent }; });
+  check(label + '：2台を合わせる：時刻のずれ ±10 ms（手拍子＋線のすれ違い）', Math.abs(sy.off - truthS.off) < 0.01,
+        sy.off.toFixed(4) + ' s（真値 ' + truthS.off + ' s、' + sy.src + '）');
+  check(label + '：2本の線のすれ違いが 3 mm 以内', sy.gap < 0.003, (sy.gap * 1000).toFixed(2) + ' mm、2台の向きの差 ' + sy.angle.toFixed(0) + '°、画角 ' + sy.f1.toFixed(1) + '° / ' + sy.f2.toFixed(1) + '°');
+  check(label + '：ステップ5 ✓・6 は使うコマ', await pg.evaluate(() => HG.steps.done(5) && HG.steps.done(6)));
+  await shot('s5-sync');
+  /* 7 3D */
+  await pg.click('#open3d'); await pg.waitForTimeout(1600);
+  check(label + '：ステップ7 ✓（3D を開いた）', await pg.evaluate(() => HG.steps.done(7)));
+  const r = await pg.evaluate(c => {
+    const rad = HG.track3dAll.map(p => Math.hypot(p.x - c[0], p.z - c[2]));
+    const mean = rad.reduce((s, v) => s + v, 0) / rad.length;
+    const ys = HG.track3dAll.map(p => p.y), my = ys.reduce((s, v) => s + v, 0) / ys.length;
+    const ang = HG.kin3d.a.map(a => {
+      const t = [c[0] - a.at.x, c[1] - a.at.y, c[2] - a.at.z], v = [a.d2.x, a.d2.y, a.d2.z];
+      return Math.acos(Math.min(1, (t[0] * v[0] + t[1] * v[1] + t[2] * v[2]) / Math.hypot(...t) / Math.hypot(...v))) * 180 / Math.PI;
+    });
+    return { mean: mean, my: my, n: HG.track3dAll.length, worst: Math.max.apply(null, ang), na: ang.length,
+             opts: ['#lyWallBackL', '#lyWallSideL', '#lyFloorL'].map(s => document.querySelector(s) ? !document.querySelector(s).classList.contains('hide') : true) };
+  }, truthS.center);
+  const err = Math.abs(r.mean - truthS.R) / truthS.R * 100;
+  check(label + '：2台で追跡した点で半径の誤差 3% 以内', err <= 3, (r.mean * 100).toFixed(2) + ' cm（真値 ' + (truthS.R * 100) + ' cm）誤差 ' + err.toFixed(2) + '%、' + r.n + ' 点');
+  check(label + '：高さ（真値 20 cm）を ±1 cm で', Math.abs(r.my - truthS.center[1]) < 0.01, (r.my * 100).toFixed(2) + ' cm');
+  check(label + '：Δv が回る軸のほうを ±5° で向く（水平・中心向き）', r.worst <= 5, r.na + ' 本、最大 ' + r.worst.toFixed(2) + '°');
+  check(label + '：1周を 8 点前後で（落ちた点なし）', r.na >= 5 && await pg.evaluate(() => HG.stereo.overlap().dropped === 0), (r.na + 2) + ' 点');
+  check(label + '：影は3つの面すべてに落とせる', r.opts.every(Boolean));
+  await pg.check('#lyVel');
+  await pg.evaluate(() => { const c = document.querySelector('#lyDv'); c.checked = true; c.dispatchEvent(new Event('change')); });
+  await pg.check('#lyWallBack'); await pg.check('#lyFloor');
+  await pg.waitForTimeout(300);
+  const g = await pg.evaluate(() => ({ card: !document.querySelector('#graphCard').classList.contains('hide'), legend: document.querySelector('#graphLegend').textContent }));
+  check(label + '：グラフは奥の壁の影（x）', g.card && /奥の壁/.test(g.legend), g.legend);
+  await pg.click('[data-view=oblique]'); await pg.waitForTimeout(1100);
+  await shot('s7-oblique');
+  await pg.click('[data-view=side]'); await pg.waitForTimeout(1100);
+  await shot('s7-side');
+  await pg.click('[data-view=camera]'); await pg.waitForTimeout(1100);
+  await shot('s7-camera');
+  await pg.check('#lyPhoto');
+  await pg.waitForFunction(() => document.querySelector('#photoInfo').textContent === '' &&
+    (() => { let n = 0; HG.viewer.content().traverse(o => { if (o.userData && o.userData.photo) n++; }); return n > 0; })(), null, { timeout: 30000 });
+  await shot('s7-photo');
+  const arv = await pg.evaluate(async () => (await HG.panel3d.arSizes()));
+  check(label + '：2台でも AR（写真・動きつき）が作れる', arv.usdz > 1000 && arv.samples >= 3, 'timeSamples ' + arv.samples + '、' + (arv.usdz / 1024).toFixed(0) + ' KB');
+  check(label + '：エラーなし', !errs.length, errs.slice(0, 3).join(' | '));
+}
+
 (async () => {
   if (SHOTS) fs.mkdirSync(OUT, { recursive: true });
   const srv = await serve(ROOT);
@@ -332,13 +458,18 @@ async function throwFlow(pg, label) {
     const ctx = await b.newContext({ viewport: vp, deviceScaleFactor: 2, hasTouch: false });
     const pg = await ctx.newPage();
     pg.__base = srv.url;
-    try { await runFlow(pg, label); } catch (e) { check(label + '：最後まで通る', false, e.message.split('\n')[0]); }
+    if (run('turntable')) try { await runFlow(pg, label); } catch (e) { check(label + '：最後まで通る', false, e.message.split('\n')[0]); }
     await ctx.close();
     const ctx2 = await b.newContext({ viewport: vp, deviceScaleFactor: 2 });
     const pg2 = await ctx2.newPage();
     pg2.__base = srv.url;
-    try { await throwFlow(pg2, label); } catch (e) { check(label + '：投射が最後まで通る', false, e.message.split('\n')[0]); }
+    if (run('throw')) try { await throwFlow(pg2, label); } catch (e) { check(label + '：投射が最後まで通る', false, e.message.split('\n')[0]); }
     await ctx2.close();
+    const ctx3 = await b.newContext({ viewport: vp, deviceScaleFactor: 2 });
+    const pg3 = await ctx3.newPage();
+    pg3.__base = srv.url;
+    if (run('stereo')) try { await stereoFlow(pg3, label); } catch (e) { check(label + '：2台のカメラが最後まで通る', false, e.message.split('\n')[0]); }
+    await ctx3.close();
   }
   await b.close(); srv.close();
   console.log(fails ? '\n' + fails + ' 件失敗' : '\nすべて通りました');

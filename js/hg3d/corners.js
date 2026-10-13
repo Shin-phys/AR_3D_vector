@@ -35,7 +35,7 @@
 
   function start(kind) {
     if (!HG.state.frames.length) return;
-    kind = kind === 'plumb' ? 'plumb' : 'corners';
+    kind = kind === 'plumb' ? 'plumb' : kind === 'ref6' ? 'ref6' : 'corners';
     if (kind === 'plumb' && !HG.recon.ready()) {
       HG.dom.html('#plumbInfo', '<span class="warn">先に紙の四隅を押してください。</span>');
       return;
@@ -46,6 +46,7 @@
     aim = null;
     HG.dom.show('#cornerPickRow');
     HG.dom.hide('#cornerStart');
+    HG.dom.hide('#refStart');
     HG.pointer.setKeepBand(true);
     HG.pointer.setDownHandler(p => moveAim(p.ox, p.oy));
     HG.pointer.setHandler(p => moveAim(p.ox, p.oy));
@@ -66,6 +67,15 @@
       hint(i === 0 ? '糸の上のほうの点を押してください' : '同じ糸の、下のほう（おもりの近く）を押してください');
       HG.dom.html('#loupeInfo', '<div class="sub"><b>' + (i === 0 ? '糸の上' : '糸の下') + '</b>：' +
         '糸の真ん中に合わせます。2点は離れているほど正確です。</div>');
+      return;
+    }
+    if (pick.kind === 'ref6') {
+      /* 2台のカメラ（ステレオ）の基準：L字の角6つ。立てた紙の左上から時計回り（stereo.js） */
+      const name = HG.stereo.ORDER[i];
+      HG.dom.text('#cornerDecide', (i + 1) + '. ' + name + 'を決定');
+      hint((i + 1) + ' / 6：' + name + 'の角を押してください');
+      HG.dom.html('#loupeInfo', '<div class="sub"><b>' + (i + 1) + '. ' + name + '</b>' +
+        (i === 0 ? '：立てた紙の左上の角。ここから時計回りに6つ。' : i === 2 || i === 5 ? '：机の紙と立てた紙の境目（折り目）の端。' : '') + '</div>');
       return;
     }
     HG.dom.text('#cornerDecide', ORD[i] + 'の角を決定');
@@ -91,15 +101,25 @@
     if (HG.ui.current !== pick.frame) {
       /* 紙が回っていると、別のコマの角が混ざる */
       pick.pts = []; pick.frame = HG.ui.current; aim = null;
-      HG.dom.html('#cornerInfo', '<span class="warn">途中でコマが変わったので、このコマで最初から押し直します。</span>');
+      HG.dom.html(pick.kind === 'ref6' ? '#refInfo' : '#cornerInfo', '<span class="warn">途中でコマが変わったので、このコマで最初から押し直します。</span>');
       prompt(); HG.stage.render();
       return;
     }
     pick.pts.push({ x: aim.x, y: aim.y });
     aim = null;
-    const need = pick.kind === 'plumb' ? 2 : 4;
+    const need = pick.kind === 'plumb' ? 2 : pick.kind === 'ref6' ? 6 : 4;
     if (pick.pts.length < need) { prompt(); HG.stage.render(); return; }
-    if (pick.kind === 'plumb') finishPlumb(); else finish();
+    if (pick.kind === 'plumb') finishPlumb();
+    else if (pick.kind === 'ref6') finishRef6();
+    else finish();
+  }
+
+  function finishRef6() {
+    const pts = pick.pts, frame = pick.frame;
+    end();
+    HG.stereo.setTaps(pts, frame);
+    HG.stage.render();
+    if (HG.steps) { HG.steps.render(); HG.steps.goTo('#refCard'); }
   }
 
   function finishPlumb() {
@@ -134,6 +154,7 @@
     pick = null; aim = null;
     HG.dom.hide('#cornerPickRow');
     HG.dom.show('#cornerStart');
+    HG.dom.show('#refStart');
     HG.dom.show('#plumbStart');
     HG.pointer.setKeepBand(false);
     HG.pointer.setDownHandler(null);
@@ -293,7 +314,9 @@
     document.querySelectorAll('input[name=plane]').forEach(r => { r.onchange = () => setPlane(r.value); });
     $('#cornerDecide').onclick = decide;
     $('#cornerCancel').onclick = () => {
+      const was = pick && pick.kind;
       end();
+      if (was === 'ref6') { HG.dom.html('#refInfo', '6点を押すのをやめました。'); return; }
       HG.dom.html('#cornerInfo', '四隅を押すのをやめました。');
       info();
     };
@@ -326,5 +349,5 @@
     setPaper();
   }
 
-  HG.corners = { attach, paint, picking: () => !!pick, solve, setPlane, setPaperBy };
+  HG.corners = { attach, paint, start, picking: () => !!pick, solve, setPlane, setPaperBy };
 })(window.HG = window.HG || {});

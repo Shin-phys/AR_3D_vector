@@ -4,6 +4,7 @@ tools/make_sample3d.py — お手本動画（合成）を作って js/hg3d/sampl
 
   python3 tools/make_sample3d.py            # 両方
   python3 tools/make_sample3d.py throw      # 投射だけ作り直す
+  python3 tools/make_sample3d.py stereo     # 2台のカメラ（円錐振り子、音つき）だけ
 
 ターンテーブルの上の A4 の紙と、紙に貼ったピンクのシール（中心に黒点）を、
 標準カメラ（横の画角 69°）で 0.55 m・仰角 40° の斜め上から撮った絵を描く。
@@ -186,6 +187,112 @@ def throw():
     print('throw', [(out / q).stat().st_size // 1024 for q in ['throw.mp4', 'throw.webm']], 'KB')
 
 
+# ===================================================================
+# 2台のカメラ（ステレオ）：円錐振り子
+#   机に A4（横）を置き、その奥の長い辺に A4（横）を垂直に立てる（L字。角は6つ）。
+#   その手前で、ピンクのおもり（半径 2 cm、中心に黒点）が糸 40 cm の円錐振り子で回る
+#   （半径 12 cm、高さ 20 cm、上から見て反時計回り）。
+#   カメラ①は左斜め前（方位 −35°、仰角 30°、0.85 m）、カメラ②は右斜め前（+40°、25°、0.95 m）。
+#   カメラ②はカメラ①より 0.613 s 早く録画を始めた体。実時刻 0.30 s に手拍子
+#   （カメラ②の音は映像より 20 ms 遅れて録音される体：機種ごとの音と映像のずれ）。
+#   音つき（MP4 は AAC、WebM は Opus）。答えは samples/stereo.json。
+# ===================================================================
+def stereo():
+    W3, H3, FPS3 = 960, 540, 30
+    G = 9.8
+    RW, RD, RH = 0.297, 0.210, 0.210
+    Rc, Ls = 0.12, 0.40
+    cosT = math.sqrt(1 - (Rc / Ls) ** 2)
+    om = math.sqrt(G / (Ls * cosT))
+    C3 = np.array([0.16, 0.20, 0.30])
+    PIV = C3 + np.array([0.0, Ls * cosT, 0.0])
+    RB = 0.02
+    CLAP, LAG2 = 0.30, 0.020
+    tgt = np.array([0.16, 0.12, 0.20])
+    cams = [dict(name='stereo1', azim=-35.0, elev=30.0, dist=0.85, start=0.0, dur=3.4, lag=0.0),
+            dict(name='stereo2', azim=40.0, elev=25.0, dist=0.95, start=-0.613, dur=4.0, lag=LAG2)]
+    f3 = (W3 / 2) / math.tan(math.radians(69.0 / 2))
+    out = ROOT / 'samples'
+    truth = {'W': W3, 'H': H3, 'fps': FPS3, 'ref': [RW, RD, RH], 'R': Rc, 'L': Ls, 'T': 2 * math.pi / om,
+             'center': C3.tolist(), 'clap': CLAP, 'off': cams[1]['start'] - cams[0]['start'], 'cams': []}
+
+    def ball(tau):
+        return C3 + Rc * np.array([math.cos(om * tau), 0.0, -math.sin(om * tau)])
+
+    for cm in cams:
+        e, a = math.radians(cm['elev']), math.radians(cm['azim'])
+        pos3 = tgt + cm['dist'] * np.array([math.cos(e) * math.sin(a), math.sin(e), math.cos(e) * math.cos(a)])
+        fw = (tgt - pos3) / np.linalg.norm(tgt - pos3)
+        rt = np.cross(fw, [0, 1, 0]); rt /= np.linalg.norm(rt)
+        dn = np.cross(fw, rt); dn /= np.linalg.norm(dn)
+
+        def proj(p):
+            r = np.asarray(p, float) - pos3
+            return [float(f3 * (r @ rt) / (r @ fw) + W3 / 2), float(f3 * (r @ dn) / (r @ fw) + H3 / 2)]
+
+        ys, xs = np.mgrid[0:H3 * SS, 0:W3 * SS]
+        u = (xs + 0.5) / SS - W3 / 2; v = (ys + 0.5) / SS - H3 / 2
+        d = u[..., None] * rt + v[..., None] * dn + f3 * fw
+        base = np.zeros((H3 * SS, W3 * SS, 3), np.float32)
+        base[:] = (0.80, 0.81, 0.82)                                # 奥の壁
+        kt = -pos3[1] / d[..., 1]                                   # 机（y = 0）
+        Xt = pos3[0] + kt * d[..., 0]; Zt = pos3[2] + kt * d[..., 2]
+        table = (kt > 0) & (Xt > -0.7) & (Xt < 1.0) & (Zt > -0.6) & (Zt < 1.2)
+        base[table] = (0.60, 0.53, 0.45)
+        desk = table & (Xt >= 0) & (Xt <= RW) & (Zt >= 0) & (Zt <= RD)
+        base[desk] = (0.97, 0.97, 0.95)
+        kw = -pos3[2] / d[..., 2]                                   # 立てた紙（z = 0）
+        Xw = pos3[0] + kw * d[..., 0]; Yw = pos3[1] + kw * d[..., 1]
+        wall = (kw > 0) & (Xw >= 0) & (Xw <= RW) & (Yw >= 0) & (Yw <= RH) & ((kt <= 0) | (kw < kt))
+        base[wall] = (0.92, 0.92, 0.90)                             # 立てた紙（光の向きで少し暗い）
+        P = np.stack([(xs + 0.5) / SS, (ys + 0.5) / SS], -1)
+        piv = np.array(proj(PIV))
+
+        n = int(round(cm['dur'] * FPS3))
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        raw = tmp / 'all.rgb'
+        with open(raw, 'wb') as fo:
+            for i in range(n + 1):
+                tau = i / FPS3 + cm['start']
+                b3 = ball(tau)
+                cc = np.array(proj(b3)); depth = (b3 - pos3) @ fw
+                rpx = f3 * RB / depth
+                img = base.copy()
+                ab = cc - piv; tt = np.clip(((P - piv) @ ab) / (ab @ ab), 0, 1)
+                img[np.linalg.norm(P - (piv + tt[..., None] * ab), axis=-1) < 0.9] = (0.15, 0.15, 0.17)   # 糸
+                dd = np.linalg.norm(P - cc, axis=-1)
+                img[dd < rpx] = (1.0, 0.24, 0.54)
+                img[dd < rpx * 0.25] = (0.05, 0.05, 0.05)
+                img = img.reshape(H3, SS, W3, SS, 3).mean(axis=(1, 3))
+                fo.write((np.clip(img, 0, 1) * 255).astype(np.uint8).tobytes())
+        # 音：小さな雑音とハム、手拍子（立ち上がりの鋭い、減衰する雑音）
+        rate = 16000
+        rng = np.random.default_rng(5 if cm['name'] == 'stereo1' else 6)
+        N = int((n + 1) / FPS3 * rate)
+        au = 0.01 * rng.standard_normal(N) + 0.02 * np.sin(2 * np.pi * 120 * np.arange(N) / rate)
+        i0 = int(round((CLAP - cm['start'] + cm['lag']) * rate))
+        L = int(0.08 * rate)
+        au[i0:i0 + L] += 0.8 * np.exp(-np.arange(L) / (0.012 * rate)) * rng.standard_normal(L)
+        wav = tmp / 'a.raw'
+        wav.write_bytes((np.clip(au, -1, 1) * 32767).astype('<i2').tobytes())
+        common = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+                  '-s', '%dx%d' % (W3, H3), '-r', str(FPS3), '-i', str(raw),
+                  '-f', 's16le', '-ar', str(rate), '-ac', '1', '-i', str(wav)]
+        nm = cm['name']
+        subprocess.run(common + ['-c:v', 'libx264', '-profile:v', 'baseline', '-pix_fmt', 'yuv420p', '-crf', '28',
+                                 '-c:a', 'aac', '-b:a', '24k', '-shortest', '-movflags', '+faststart',
+                                 str(out / (nm + '.mp4'))], check=True)
+        subprocess.run(common + ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', '40',
+                                 '-c:a', 'libopus', '-b:a', '24k', '-shortest', str(out / (nm + '.webm'))], check=True)
+        L6 = [[0, RH, 0], [RW, RH, 0], [RW, 0, 0], [RW, 0, RD], [0, 0, RD], [0, 0, 0]]
+        truth['cams'].append({'name': nm, 'start': cm['start'], 'dur': cm['dur'], 'azim': cm['azim'], 'elev': cm['elev'],
+                              'dist': cm['dist'], 'pos': pos3.tolist(), 'f': f3, 'lag': cm['lag'],
+                              'clapVideoT': CLAP - cm['start'],
+                              'taps': [proj(q) for q in L6], 'ball_t0': proj(ball(cm['start']))})
+        print(nm, [(out / q).stat().st_size // 1024 for q in [nm + '.mp4', nm + '.webm']], 'KB')
+    (out / 'stereo.json').write_text(json.dumps(truth, indent=1), encoding='utf-8')
+
+
 def write_js():
     out = ROOT / 'samples'
     b64 = lambda p, m: 'data:%s;base64,%s' % (m, base64.b64encode(p.read_bytes()).decode('ascii'))
@@ -208,8 +315,34 @@ def write_js():
     print('samples3d.js', len(js) // 1024, 'KB')
 
 
+def write_js_stereo():
+    """2台のお手本は大きいので別のファイル（押したときだけ読む。main3d.js）"""
+    out = ROOT / 'samples'
+    b64 = lambda p, m: 'data:%s;base64,%s' % (m, base64.b64encode(p.read_bytes()).decode('ascii'))
+    items = []
+    for key in ['stereo1', 'stereo2']:
+        items.append('    %s: {\n      mp4: "%s",\n      webm: "%s"\n    }' % (
+            key, b64(out / (key + '.mp4'), 'video/mp4'), b64(out / (key + '.webm'), 'video/webm')))
+    js = """/* 自動生成ファイル。編集しないこと。
+   tools/make_sample3d.py が samples/stereo*.mp4|webm から作ります（2台のカメラの合成のお手本動画。音つき）。
+   大きいので 3d.html では最初から読まず、「お手本を試す」を押したときに読み込む。 */
+(function (HG) {
+  'use strict';
+  HG.samples3d = HG.samples3d || {};
+  Object.assign(HG.samples3d, {
+%s
+  });
+})(window.HG = window.HG || {});
+""" % ',\n'.join(items)
+    (ROOT / 'js' / 'hg3d' / 'samples3d-stereo.js').write_text(js, encoding='utf-8')
+    print('samples3d-stereo.js', len(js) // 1024, 'KB')
+
+
 import sys
-which = sys.argv[1:] or ['turntable', 'throw']
+which = sys.argv[1:] or ['turntable', 'throw', 'stereo']
 if 'turntable' in which: turntable()
 if 'throw' in which: throw()
-write_js()
+if 'stereo' in which:
+    stereo()
+    write_js_stereo()
+if 'turntable' in which or 'throw' in which: write_js()

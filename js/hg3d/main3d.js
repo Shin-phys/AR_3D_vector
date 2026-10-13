@@ -41,11 +41,15 @@
     $('#selCount').value = HG.state.selection.count;
     /* 紙を置いた面。自由測定は生徒が選ぶ（いまの選択のまま） */
     if (p.plane) HG.corners.setPlane(p.plane);
+    else if (HG.recon.state.plane === 'stereo') HG.corners.setPlane('horizontal');
+    /* 2台のカメラ（ステレオ）は画面の流れごと変わる（stereo-ui.js） */
+    HG.stereo.activate(p.plane === 'stereo');
     HG.panel3d.reset();
     /* preset.note（解説）はここでは出さない。shootTips だけ */
     HG.dom.html('#presetNote', '<div class="lead">' + p.name + '</div>' +
       '<div class="sub spaced-sm">' + (p.shootTips || []).map(s => '<div class="spaced-sm">' + s + '</div>').join('') + '</div>');
-    const smp = sample(p);
+    /* 2台のお手本は大きいので、押したときに読み込む（まだ無くてもボタンは出す） */
+    const smp = sample(p) || (p.plane === 'stereo' && p.sampleKey);
     $('#sampleRow').classList.toggle('hide', !smp);
     if (smp) HG.dom.html('#sampleBtn', 'お手本を試す' + (p.sampleNote ? '<span class="sub"> ' + p.sampleNote + '</span>' : ''));
     HG.dom.hide('#screen0'); HG.dom.show('#screen1'); HG.dom.show('#goHome');
@@ -57,7 +61,8 @@
    * MP4（H.264）を先に試す。headless の Chromium は H.264 を持たないので WebM。
    */
   function sample(p) {
-    const s = HG.samples3d && p.sampleKey && HG.samples3d[p.sampleKey];
+    const key = (HG.stereo.active() && p.sampleKey) ? HG.stereo.sampleKey() : p.sampleKey;
+    const s = HG.samples3d && key && HG.samples3d[key];
     if (!s) return null;
     const v = document.createElement('video');
     if (s.mp4 && v.canPlayType('video/mp4; codecs="avc1.42E01E"')) return s.mp4;
@@ -72,8 +77,13 @@
     ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
     ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hot'); }));
     drop.addEventListener('drop', e => { const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) start(f); });
-    $('#sampleBtn').onclick = () => {
-      const p = HG.state.preset, s = sample(p);
+    $('#sampleBtn').onclick = async () => {
+      const p = HG.state.preset;
+      if (HG.stereo.active() && !(HG.samples3d && HG.samples3d.stereo1)) {
+        say('お手本を読み込んでいます…');
+        try { await loadScript('js/hg3d/samples3d-stereo.js'); } catch (e) { say('お手本を読み込めませんでした。', 'warn'); return; }
+      }
+      const s = sample(p);
       if (!s) return;
       /* お手本は答えの寸法の紙で撮ってある */
       if (p.samplePaper) HG.corners.setPaperBy(p.samplePaper);
@@ -81,7 +91,8 @@
     };
     $('#goHome').onclick = () => {
       const dirty = HG.state.frames.length > 0;
-      if (dirty && !confirm('最初の画面（運動を選ぶ）に戻ります。\n読み込んだ動画と、追跡・四隅の結果は消えます。よろしいですか？')) return;
+      if ((dirty || (HG.stereo.active() && HG.stereo.camNo() === 2)) &&
+          !confirm('最初の画面（運動を選ぶ）に戻ります。\n読み込んだ動画と、追跡・四隅の結果は消えます。よろしいですか？')) return;
       location.reload();
     };
     $('#tiles').onclick = e => { const el = e.target.closest('[data-id]'); if (el) choose(el.dataset.id); };
@@ -91,9 +102,20 @@
     };
   }
 
+  /** スクリプトをあとから読む（2台のお手本。file:// でも <script src> なら読める） */
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      const el = document.createElement('script');
+      el.src = src; el.onload = res; el.onerror = () => rej(new Error(src));
+      document.head.appendChild(el);
+    });
+  }
+
   async function start(file) {
     const vid = $('#vid');
     say('読み込み中…');
+    /* ステレオ：手拍子を探すため、音も読む（待たない。走査と並行して進む） */
+    if (HG.stereo.active()) HG.stereo.onLoad(file);
     HG.dom.show('#vid'); HG.dom.hide('#cv');
     const res = await HG.loader.load(file, vid);
     if (!res.ok) {
@@ -135,12 +157,14 @@
     HG.stage.register(HG.overlay.drawPoints);
     HG.stage.register(HG.overlay.drawMarker);
     HG.stage.register(HG.corners.paint);            // 紙の四隅
+    HG.stage.register(HG.stereo.paint);             // 2台のカメラの基準（6点と描き戻した L字）
     HG.stage.register(HG.trackControls.paintAim);   // 色・マーカーの照準（最前面）
     HG.controls.attach();
     HG.trackControls.attach();
     HG.selection.attach();
     HG.steps.attach();
     HG.corners.attach();
+    HG.stereo.attach();
     HG.panel3d.attach();
     renderTiles();
     wireUpload();

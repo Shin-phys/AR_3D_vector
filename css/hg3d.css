@@ -59,3 +59,10 @@ body.view3d #stageCard{display:none;}
 .ar-result button.picked{background:var(--accent); color:#fff; border-color:var(--accent);}
 pre.summary{white-space:pre-wrap; word-break:break-all; background:#f6f7f9; border:1px solid var(--line);
             border-radius:8px; padding:8px 10px; font-size:12px; margin:0 0 8px;}
+
+/* ===== 2台のカメラ（ステレオ） ===== */
+/* ステップの帯の先頭に、いまどちらのカメラの動画かを出す */
+.cam-tag{display:inline-flex; align-items:center; padding:0 8px; margin-right:4px; border-radius:8px;
+         background:#12161c; color:#fff; font-size:12px; font-weight:700; white-space:nowrap; align-self:center; min-height:28px;}
+#stCams > div{margin:2px 0;}
+#stNudge button{min-height:36px; font-size:13px; padding:0 8px;}

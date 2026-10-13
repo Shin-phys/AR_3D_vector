@@ -73,8 +73,11 @@
    * 札の向きと大きさ。紙の上で「画面の右」「画面の上」に当たる向きを軸にする。
    * こうすると切り抜きが、カメラから見えたとおりの向きで紙の面に貼られる。
    * @param ph  {at:{x,y}（画像上）, rpx}
+   * @param p   その点の 3D の位置（2台のカメラのときだけ使う：奥行きで大きさが決まる）
    */
-  function frameOf(ph) {
+  function frameOf(ph, p) {
+    /* 2台のカメラ：紙の面が無い。カメラ②（切り抜いた動画）の画面に平行な札にする */
+    if (HG.recon.state.plane === 'stereo') return HG.stereo.cardFrame(ph, p);
     const u = ph.at.x, v = ph.at.y, d = ph.rpx;
     /* 四隅と同じく、カメラぶれ補正後の座標で 3D に直す（追跡点と同じ道） */
     const dx = ph.corr ? ph.corr.dx : 0, dy = ph.corr ? ph.corr.dy : 0;

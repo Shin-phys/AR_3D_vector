@@ -25,11 +25,13 @@
     const d = { track: HG.track3d || [], trackAll: HG.track3dAll || [], kin: HG.kin3d || { v: [], a: [] },
              paper: HG.recon.ready() ? HG.recon.paperWorld() : null,
              plane: HG.recon.state.plane, plumb: HG.recon.plumbWorld() };
+    /* 2台のカメラ：基準は L字の2枚（机の紙と立てた紙） */
+    if (stereo()) d.papers = HG.stereo.papers();
     /* 実物の写真（切り抜き）。切り抜き済みのコマだけ札にし、まだのコマは球のまま */
     if ($('#lyPhoto').checked) {
-      d.photoCards = d.track.map(p => { const ph = HG.photo.get(p.index); return ph ? { canvas: ph.canvas, fr: HG.photo.frameOf(ph) } : null; });
+      d.photoCards = d.track.map(p => { const ph = HG.photo.get(p.index); return ph ? { canvas: ph.canvas, fr: HG.photo.frameOf(ph, p) } : null; });
       const first = d.track.length ? HG.photo.get(d.track[0].index) : null;
-      d.photoNow = first ? { canvas: first.canvas, fr: HG.photo.frameOf(first) } : null;
+      d.photoNow = first ? { canvas: first.canvas, fr: HG.photo.frameOf(first, d.track[0]) } : null;
     }
     return d;
   }
@@ -53,7 +55,16 @@
   }
 
   /** 3D を開ける状態か。開けないなら理由 */
+  function stereo() { return HG.recon.state.plane === 'stereo'; }
+
   function blocker() {
+    if (stereo()) {
+      if (HG.stereo.camNo() !== 2) return '先にステップ5で<b>カメラ①を記録</b>して、カメラ②の動画を読み込んでください。';
+      if (!HG.stereo.ready()) return '先にステップ5で<b>2台を合わせて</b>ください。';
+      const n = HG.selection.isActive() ? HG.selection.list().filter(f => f.found).length : 0;
+      if (n < 3) return '先にステップ6で使うコマを決めてください（座標のあるコマが 3 つ以上要ります）。';
+      return '';
+    }
     if (!HG.recon.ready()) return '先にステップ2で<b>紙の四隅</b>を押してください。';
     const n = HG.selection.isActive() ? HG.selection.list().filter(f => f.found).length : 0;
     if (n < 3) return '先にステップ4・5で<b>座標</b>を取り、使うコマを決めてください（座標のあるコマが 3 つ以上要ります）。';
@@ -131,6 +142,7 @@
   function drawGraph() {
     const L = HG.viewer.opts.layers;
     const vert = HG.recon.state.plane === 'vertical';
+    /* 机の上・2台のカメラ：奥の壁（x）と横の壁（z）。床の影はグラフにしない（x と z の両方が動くので） */
     const which = vert ? { floor: !!L.floor, side: !!L.wallSide } : { back: !!L.wallBack, side: !!L.wallSide };
     const on = Object.keys(which).some(k => which[k]);
     $('#graphCard').classList.toggle('hide', !on || !open);
@@ -148,6 +160,12 @@
   function quality() {
     const all = HG.track3dAll || [], pw = HG.recon.ready() ? HG.recon.paperWorld() : null;
     let msg = '';
+    /* 2台のカメラ：カメラ①に写っていない時刻の点は 3D にできない（落とした数を知らせる） */
+    const ov = stereo() && HG.stereo.overlap();
+    if (ov && ov.dropped > 0) {
+      msg = '<span class="warn">使うコマのうち ' + ov.dropped + ' 個は、カメラ①に写っていない時刻なので 3D にできませんでした。</span>' +
+        '区間（ステップ1）を、カメラ①と重なる t = ' + Math.max(0, ov.t0).toFixed(2) + '〜' + ov.t1.toFixed(2) + ' s の中にしてください。';
+    }
     if (pw && all.length > 2) {
       const span = pts => { let m = 0; pts.forEach(a => pts.forEach(b => { m = Math.max(m, Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z)); })); return m; };
       const step = Math.max(1, Math.floor(all.length / 40));
@@ -165,8 +183,11 @@
   /** 面の向きで、出す影の選択肢を入れ替える（ボードの運動では奥の壁＝ボードなので出さない） */
   function planeOptions() {
     const vert = HG.recon.state.plane === 'vertical';
-    $('#lyWallBackL').classList.toggle('hide', vert);
-    $('#lyFloorL').classList.toggle('hide', !vert);
+    /* 2台のカメラでは、運動は面に乗っていない。3つの面すべてに影を落とせる */
+    const all = stereo();
+    $('#lyWallBackL').classList.toggle('hide', vert && !all);
+    $('#lyFloorL').classList.toggle('hide', !vert && !all);
+    if (all) return;
     if (vert) $('#lyWallBack').checked = false; else $('#lyFloor').checked = false;
   }
 
@@ -372,7 +393,7 @@
 
   /* ---------- 書き出し ---------- */
   function csv3d() {
-    if (!HG.recon.ready()) { alert('先に紙の四隅を押してください。'); return; }
+    if (!HG.recon.ready()) { alert(stereo() ? '先に2台を合わせてください。' : '先に紙の四隅を押してください。'); return; }
     HG.recon.compute();
     const sel = new Set((HG.track3d || []).map(p => p.index));
     const rows = ['index,t_s,x_m,y_m,z_m,used'];

@@ -16,6 +16,7 @@ globalThis.HG = {};
 require(ROOT + '/js/hg3d/geom.js');
 require(ROOT + '/js/hg3d/testdata.js');
 require(ROOT + '/js/hg3d/reconstruct.js');
+require(ROOT + '/js/hg3d/stereo.js');
 const HG = globalThis.HG;
 
 let fails = 0;
@@ -223,6 +224,113 @@ console.log('\n[合成データ] ボードに沿った斜方投射（1.6 m・仰
   check('投射：カメラが手前（z > 0）、Δv は −y', cw.pos.z > 0.5 && a.r.kin.a.every(q => q.d2.y < 0),
         'カメラ z = ' + cw.pos.z.toFixed(2) + ' m');
   HG.recon.setPlane('horizontal'); HG.recon.setPlumb([], null); HG.recon.state.paper = { w: 0.297, h: 0.210 };
+}
+
+
+/* ===== 2台のカメラ（ステレオ、3D仕様.md §4-C）=====
+   基準は L字（机に置いた A4 と、その奥の辺に立てた A4。角は6つ）。
+   円錐振り子（半径 15 cm、糸 50 cm、周期 約 1.4 s）を、正面の左右 75° 離れた2台で撮る。
+   カメラ②はカメラ①より 0.8 s 早く録画を始め、カメラ②の音は映像より 25 ms 遅れている体。
+   追跡 σ=1px、6点のタップ σ=2px、VFR の揺れ ±2 ms。40 通りの中央値と 90% 点で見る。 */
+console.log('\n[合成データ] 2台のカメラ・円錐振り子（L字 A4×2、1.1〜1.2 m、追跡 σ=1px、6点 σ=2px、30 fps）');
+{
+  const S = HG.stereoMath;
+  const q = (a, p) => { const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+  const f2 = a => q(a, 0.5).toFixed(2) + ' / ' + q(a, 0.9).toFixed(2);
+
+  /* 6点だけでカメラが決まる（ずれ0なら焦点距離も位置も合う） */
+  {
+    const d = HG.testdata.stereoConical({ tapNoise: 0, noise: 0 });
+    const c = S.calibrate(d.cam1.taps, d.ref, d.cam1.W, d.cam1.H);
+    const e = Math.hypot(c.C.x - d.cam1.camera.pos.x, c.C.y - d.cam1.camera.pos.y, c.C.z - d.cam1.camera.pos.z);
+    check('ステレオ：6点（ずれ0）で焦点距離と位置が合う', Math.abs(c.f / d.cam1.camera.f - 1) < 0.002 && e < 0.002,
+          '焦点距離の比 ' + (c.f / d.cam1.camera.f).toFixed(4) + '、位置の誤差 ' + (e * 1000).toFixed(2) + ' mm');
+    /* 押す順を左右逆にすると、鏡に映した配置になる。カメラとしては合わないので ok にならない */
+    const m = [1, 0, 5, 4, 3, 2].map(i => d.cam1.taps[i]);
+    const cm = S.calibrate(m, d.ref, d.cam1.W, d.cam1.H);
+    check('ステレオ：押す順が左右逆なら「合わない」と分かる', !cm.ok, '写し戻しのずれ ' + cm.err.toFixed(1) + ' px');
+  }
+
+  /* 手拍子：音の立ち上がりの時刻（カメラ②は 25 ms 遅れて録音される体） */
+  {
+    const d = HG.testdata.stereoConical({ seed: 2, cam2: { dist: 1.2, elev: 25, azim: 40, start: -0.8 } });
+    const a = S.clapTime(d.cam1.audio, d.cam1.rate), b = S.clapTime(d.cam2.audio, d.cam2.rate);
+    const e1 = (a.t - d.cam1.clapVideoT) * 1000, e2 = (b.t - d.cam2.clapVideoT - 0.025) * 1000;
+    check('ステレオ：手拍子の立ち上がりを ±3 ms で見つける', Math.abs(e1) < 3 && Math.abs(e2) < 3,
+          'カメラ① ' + e1.toFixed(1) + ' ms ／ カメラ② ' + e2.toFixed(1) + ' ms（音の遅れを除いて）');
+  }
+
+  function study(o, opt) {
+    const R = { rad6: [], rad: [], dv6: [], dv: [], ysd: [], sA: [], s: [], gap: [], f6: [], f: [], ok: 0 };
+    for (let seed = 1; seed <= 40; seed++) {
+      const d = HG.testdata.stereoConical(Object.assign({ seed: seed }, o));
+      const c1 = S.calibrate(d.cam1.taps, d.ref, d.cam1.W, d.cam1.H), c2 = S.calibrate(d.cam2.taps, d.ref, d.cam2.W, d.cam2.H);
+      if (c1.ok && c2.ok) R.ok++;
+      const tr1 = d.cam1.frames.map(f => ({ t: f.t, x: f.x, y: f.y }));
+      const a = S.clapTime(d.cam1.audio, d.cam1.rate), b = S.clapTime(d.cam2.audio, d.cam2.rate);
+      const offA = a.t - b.t;
+      R.sA.push(Math.abs(offA - d.off) * 1000);
+      const g = S.syncByGeometry(c1, tr1, c2, d.cam2.frames, offA, 0.15);
+      const p = S.refinePair(c1, c2, d.ref, d.cam1.taps, d.cam2.taps, tr1, d.cam2.frames, g.off, { withOff: true });
+      R.s.push(Math.abs(p.off - d.off) * 1000);
+      R.f6.push(Math.abs(c1.f / d.cam1.camera.f - 1) * 100); R.f.push(Math.abs(p.cam1.f / d.cam1.camera.f - 1) * 100);
+      const m = Math.round(d.T * 30 / 8);
+      const sel = d.cam2.frames.filter((f, i) => i % m === 0).slice(0, 9);
+      const ev = (k1, k2, off) => {
+        const r = S.computeFrom(sel, d.cam2.frames, k1, tr1, k2, off);
+        const rad = r.trackAll.map(p => Math.hypot(p.x - d.axis.x, p.z - d.axis.z));
+        const mr = rad.reduce((s, v) => s + v, 0) / rad.length;
+        const ys = r.trackAll.map(p => p.y), my = ys.reduce((s, v) => s + v, 0) / ys.length;
+        let worst = 0;
+        r.kin.a.forEach(k => {
+          const t = [d.axis.x - k.at.x, d.c.y - k.at.y, d.axis.z - k.at.z], v = [k.d2.x, k.d2.y, k.d2.z];
+          const cs = (t[0] * v[0] + t[1] * v[1] + t[2] * v[2]) / Math.hypot(...t) / Math.hypot(...v);
+          worst = Math.max(worst, Math.acos(Math.min(1, cs)) * 180 / Math.PI);
+        });
+        return { rad: Math.abs(mr - d.R) / d.R * 100, dv: worst, gap: r.gap * 1000,
+                 ysd: Math.sqrt(ys.reduce((s, v) => s + (v - my) * (v - my), 0) / ys.length) * 1000 };
+      };
+      const e6 = ev(c1, c2, g.off), e = ev(p.cam1, p.cam2, p.off);
+      R.rad6.push(e6.rad); R.rad.push(e.rad); R.dv6.push(e6.dv); R.dv.push(e.dv); R.ysd.push(e.ysd); R.gap.push(e.gap);
+    }
+    return R;
+  }
+  const base = { cam2: { dist: 1.2, elev: 25, azim: 40, start: -0.8 } };
+  const R = study(base);
+  check('ステレオ：6点から決めたカメラが「合う」と判定される（40 通りすべて）', R.ok === 40, R.ok + ' / 40');
+  check('ステレオ：手拍子だけの時刻のずれ（音の遅れ 25 ms がそのまま残る）', q(R.sA, 0.5) > 20,
+        '中央値 / 90% ' + f2(R.sA) + ' ms');
+  check('ステレオ：2台をいっしょに合わせ直すと、時刻のずれ 10 ms 以内（90%）', q(R.s, 0.9) < 10, f2(R.s) + ' ms');
+  check('ステレオ：焦点距離の誤差が小さくなる（6点だけ → 2台いっしょ）', q(R.f, 0.9) < q(R.f6, 0.9),
+        f2(R.f6) + ' % → ' + f2(R.f) + ' %');
+  check('ステレオ：復元半径の誤差 3% 以内（90%）', q(R.rad, 0.9) <= 3, '6点だけ ' + f2(R.rad6) + ' % → 2台いっしょ ' + f2(R.rad) + ' %');
+  check('ステレオ：Δv の向きが回る軸から ±5° 以内（90%、各回の最大）', q(R.dv, 0.9) <= 5, f2(R.dv) + '°（6点だけ ' + f2(R.dv6) + '°）');
+  check('ステレオ：高さが一定（ばらつき 5 mm 以内、90%）', q(R.ysd, 0.9) <= 5, f2(R.ysd) + ' mm');
+  check('ステレオ：2本の線のすれ違い（中央値）が 3 mm 以内', q(R.gap, 0.9) <= 3, f2(R.gap) + ' mm');
+
+  /* 音が無いとき：線のすれ違いだけで ±1.5 s を探す。周期運動では1周ずれても同じ軌道になる（どちらでも 3D は同じ） */
+  {
+    const errs = [];
+    for (let seed = 1; seed <= 10; seed++) {
+      const d = HG.testdata.stereoConical(Object.assign({ seed: seed }, base));
+      const c1 = S.calibrate(d.cam1.taps, d.ref, d.cam1.W, d.cam1.H), c2 = S.calibrate(d.cam2.taps, d.ref, d.cam2.W, d.cam2.H);
+      const tr1 = d.cam1.frames.map(f => ({ t: f.t, x: f.x, y: f.y }));
+      const g = S.syncByGeometry(c1, tr1, c2, d.cam2.frames, 0, 1.5);
+      const p = S.refinePair(c1, c2, d.ref, d.cam1.taps, d.cam2.taps, tr1, d.cam2.frames, g.off, { withOff: true });
+      const k = Math.round((p.off - d.off) / d.T);
+      errs.push(Math.abs(p.off - d.off - k * d.T) * 1000);
+    }
+    check('ステレオ：音が無くても、線のすれ違いだけで時刻が合う（1周の違いは同じ軌道）', q(errs, 0.9) < 10, f2(errs) + ' ms（10 通り）');
+  }
+
+  /* 条件を変えると（参考：数字を README に書く） */
+  const show = (label, o) => { const r = study(o); console.log('    参考 ' + label + '：半径 ' + f2(r.rad) + ' %、Δv ' + f2(r.dv) + '°、時刻 ' + f2(r.s) + ' ms、焦点距離 ' + f2(r.f) + ' %'); return r; };
+  show('A3×2', Object.assign({ ref: { w: 0.42, d: 0.297, h: 0.297 } }, base));
+  const nar = show('2台の間が 40°', { cam1: { dist: 1.1, elev: 30, azim: -20 }, cam2: { dist: 1.2, elev: 25, azim: 20, start: -0.8 } });
+  const far = show('2 m から', { cam1: { dist: 2, elev: 30, azim: -35 }, cam2: { dist: 2, elev: 25, azim: 40, start: -0.8 } });
+  const tl = show('立てた紙が 3° 倒れている', Object.assign({ tilt: 3 }, base));
+  show('2台の画角が違う（60°と75°）', { cam1: { dist: 1.1, elev: 30, azim: -35, hfov: 60 }, cam2: { dist: 1.2, elev: 25, azim: 40, hfov: 75, start: -0.8 } });
+  check('ステレオ：2台の間が狭いと悪くなる（見積もりの裏付け）', q(nar.rad, 0.9) > q(R.rad, 0.9), '');
 }
 
 console.log(fails ? '\n' + fails + ' 件失敗' : '\nすべて通りました');
