@@ -359,10 +359,13 @@
       <div class="layers spaced-sm">
         <label class="chk"><input type="checkbox" id="lyBalls" checked> <span class="sw" style="background:#ff2d6f"></span> ストロボ（球）</label>
         <label class="chk"><input type="checkbox" id="lyPaper" checked> 紙と床の目盛り</label>
+        <label class="chk"><input type="checkbox" id="lyPhoto"> 実物の写真で表示</label>
         <label class="chk"><input type="checkbox" id="lyPos"> <span class="sw" style="background:#0b6bcb"></span> 位置（紙の角 A から）</label>
         <label class="chk"><input type="checkbox" id="lyVel"> <span class="sw" style="background:#12a150"></span> 速度</label>
         <label class="chk"><input type="checkbox" id="lyDv"> <span class="sw" style="background:#ff7a00"></span> Δv（加速度）</label>
       </div>
+
+      <div class="sub spaced-sm" id="photoInfo"></div>
 
       <!-- Δv は予測を経てから出す（3D仕様.md §5「予測フローは2Dと同じ」）。
            予測を使うかは教師が切り替える（2D と同じく既定は OFF） -->
@@ -492,6 +495,7 @@
 <script src="js/hg3d/reconstruct.js"></script>
 <script src="js/hg3d/testdata.js"></script>
 <script src="js/hg3d/meshes.js"></script>
+<script src="js/hg3d/photo.js"></script>
 <script src="js/hg3d/content.js"></script>
 <script src="js/hg3d/viewer.js"></script>
 <script src="js/hg3d/graph.js"></script>

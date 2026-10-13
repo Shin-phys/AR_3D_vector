@@ -117,8 +117,11 @@
     }
 
     const tr = data.track || [];
-    /* ストロボ（使うコマの位置に球） */
-    if (L.balls !== false) tr.forEach(p => g.add(M.ball(p, s.ball, C.ball)));
+    /* ストロボ（使うコマの位置に球）。「実物の写真で表示」のときは、そのコマの切り抜きの札 */
+    if (L.balls !== false) tr.forEach((p, i) => {
+      const pc = L.photo && data.photoCards && data.photoCards[i];
+      g.add(pc ? HG.photo.card(pc.canvas, p, pc.fr) : M.ball(p, s.ball, C.ball));
+    });
 
     /* 位置ベクトル（基準点＝紙の角 A から）。基準点には小さな印 */
     if (L.pos) {
@@ -162,7 +165,8 @@
       if (L.dv) kin.a.forEach(a => sh(a.at, { x: a.d2.x * zoom, y: a.d2.y * zoom, z: a.d2.z * zoom }, C.dv, s.arrow * 0.8));
     }
     g.userData = { hW: hW };
-    return { group: g, ext: ext, stage: st, sizes: s, plane: data.plane || 'horizontal' };
+    return { group: g, ext: ext, stage: st, sizes: s, plane: data.plane || 'horizontal',
+             photoNow: L.photo ? data.photoNow || null : null };
   }
 
   /* ---------- 「いま」の球と影（動くもの） ----------
@@ -174,7 +178,13 @@
     const g = new THREE.Group();
     const named = (m, n) => { m.name = n; g.add(m); return m; };
     const o = { group: g, r: s.arrow * 0.35, parts: [] };
-    o.ball = named(M.ball({ x: 0, y: 0, z: 0 }, s.ball * 1.25, C.ballNow), 'HGANIM_ball');
+    /* 「いま」も、写真のときは切り抜きの札（枠の色で「いま」と分かるよう、黄色の輪を添える） */
+    if (built.photoNow) {
+      const c = HG.photo.card(built.photoNow.canvas, { x: 0, y: 0, z: 0 }, built.photoNow.fr, { ring: C.ballNow });
+      o.ball = named(c, 'HGANIM_ball');
+    } else {
+      o.ball = named(M.ball({ x: 0, y: 0, z: 0 }, s.ball * 1.25, C.ballNow), 'HGANIM_ball');
+    }
     o.parts.push(o.ball);
     const unitRod = () => new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8), M.mat('#12161c', 0.35));
     if (layers.wallBack) {

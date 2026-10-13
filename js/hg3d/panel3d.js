@@ -22,9 +22,34 @@
   let play = null;
 
   function data() {
-    return { track: HG.track3d || [], trackAll: HG.track3dAll || [], kin: HG.kin3d || { v: [], a: [] },
+    const d = { track: HG.track3d || [], trackAll: HG.track3dAll || [], kin: HG.kin3d || { v: [], a: [] },
              paper: HG.recon.ready() ? HG.recon.paperWorld() : null,
              plane: HG.recon.state.plane, plumb: HG.recon.plumbWorld() };
+    /* 実物の写真（切り抜き）。切り抜き済みのコマだけ札にし、まだのコマは球のまま */
+    if ($('#lyPhoto').checked) {
+      d.photoCards = d.track.map(p => { const ph = HG.photo.get(p.index); return ph ? { canvas: ph.canvas, fr: HG.photo.frameOf(ph) } : null; });
+      const first = d.track.length ? HG.photo.get(d.track[0].index) : null;
+      d.photoNow = first ? { canvas: first.canvas, fr: HG.photo.frameOf(first) } : null;
+    }
+    return d;
+  }
+
+  /** 写真の切り抜きを集めてから描き直す（使うコマが変わったら、足りない分だけ） */
+  let photoBusy = false;
+  async function ensurePhotos() {
+    if (!$('#lyPhoto').checked || photoBusy) return;
+    const need = (HG.track3d || []).map(p => HG.state.frames[p.index]).filter(f => f && !HG.photo.get(f.index));
+    if (!need.length) return;
+    photoBusy = true;
+    HG.dom.text('#photoInfo', '写真を切り出しています…');
+    try {
+      await HG.photo.collect(need, r => HG.dom.text('#photoInfo', '写真を切り出しています… ' + Math.round(r * 100) + '%'));
+      HG.dom.text('#photoInfo', '');
+    } catch (e) {
+      HG.dom.text('#photoInfo', '写真を切り出せませんでした：' + e.message);
+    }
+    photoBusy = false;
+    if (open) { HG.viewer.setData(data()); setNow(+$('#nowSlider').value); }
   }
 
   /** 3D を開ける状態か。開けないなら理由 */
@@ -78,9 +103,11 @@
     planeOptions();
     quality();
     HG.viewer.opts.layers.wallBack = $('#lyWallBack').checked;
+    HG.viewer.opts.layers.photo = $('#lyPhoto').checked;
     HG.viewer.opts.layers.floor = $('#lyFloor').checked;
     const d = data();
     HG.viewer.setData(d);
+    ensurePhotos();
     const s = $('#nowSlider');
     s.max = Math.max(0, d.trackAll.length - 1);
     if (+s.value > +s.max) s.value = s.max;
@@ -159,9 +186,12 @@
       balls: $('#lyBalls').checked, paper: $('#lyPaper').checked, grid: $('#lyPaper').checked,
       pos: $('#lyPos').checked, vel: $('#lyVel').checked, dv: $('#lyDv').checked,
       wallBack: $('#lyWallBack').checked, wallSide: $('#lyWallSide').checked,
-      floor: $('#lyFloor').checked, arrowSh: $('#lyArrowSh').checked
+      floor: $('#lyFloor').checked, arrowSh: $('#lyArrowSh').checked,
+      photo: $('#lyPhoto').checked
     };
+    HG.viewer.setData(data());
     HG.viewer.setLayers(L);
+    ensurePhotos();
     $('#dvZoomRow').classList.toggle('hide', !L.dv);
     if (L.dv) seen.dv = true;
     if (L.wallBack || L.wallSide || L.floor) seen.wall = true;
@@ -364,7 +394,9 @@
     $('#open3d').onclick = show3d;
     $('#back2d').onclick = back2d;
     $('#viewBtns').onclick = e => { const b = e.target.closest('[data-view]'); if (b) setView(b.dataset.view); };
-    ['#lyBalls', '#lyPaper', '#lyPos', '#lyVel', '#lyWallBack', '#lyWallSide', '#lyFloor', '#lyArrowSh'].forEach(s => { $(s).onchange = layers; });
+    ['#lyBalls', '#lyPaper', '#lyPos', '#lyVel', '#lyWallBack', '#lyWallSide', '#lyFloor', '#lyArrowSh', '#lyPhoto'].forEach(s => { $(s).onchange = layers; });
+    /* 動画を読み直したら、切り抜きは捨てる */
+    HG.bus.on('frames:scanned', () => HG.photo.clear());
     $('#lyDv').onchange = onDv;
     $('#predGate').onclick = e => { const b = e.target.closest('[data-id]'); if (b) answer(b.dataset.id); };
     $('#dvZoom').oninput = e => {

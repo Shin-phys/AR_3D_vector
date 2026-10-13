@@ -21,6 +21,17 @@ const check = (n, ok, d) => { console.log((ok ? '  ok   ' : '  FAIL ') + n + (d 
   await pg.waitForFunction(() => window.__makeArFiles && HG.viewer.content());
   const r = await pg.evaluate(async () => { const x = await window.__makeArFiles(); return { glb: x.glb.length, usdz: x.usdz.length }; });
   check('GLB と USDZ が作れる', r.glb > 1000 && r.usdz > 1000, 'GLB ' + (r.glb * 0.75 / 1024).toFixed(0) + ' KB ／ USDZ ' + (r.usdz * 0.75 / 1024).toFixed(0) + ' KB');
+  /* 方式5：写真の札。USDZ の中に写真（png）と切り抜きのしきい値と動きが入っているか */
+  const ph = await pg.evaluate(() => window.__photoUsdz());
+  const buf = Buffer.from(ph, 'base64');
+  fs.writeFileSync(path.join(__dirname, 'out-photo.usdz'), buf);
+  const F = require(ROOT + '/tools/test/unzip.js');
+  const files = F.list(buf);
+  const usda = F.read(buf, 'model.usda').toString('utf8');
+  const pngs = files.filter(f => /\.png$/.test(f)).length;
+  check('方式5：写真（png）が入っている', pngs >= 9, pngs + ' 枚');
+  check('方式5：切り抜き（opacityThreshold）', /opacityThreshold/.test(usda));
+  check('方式5：「いま」の札が動く（timeSamples）', /HGANIM_ball[\s\S]*timeSamples/.test(usda));
   ['test.glb', 'test.usdz', 'thumb.png'].forEach(f => check('ar-test/' + f + ' がある', fs.existsSync(path.join(ROOT, 'ar-test', f))));
   check('エラーなし', !errs.length, errs.join(' | '));
   await b.close(); srv.close();

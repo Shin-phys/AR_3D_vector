@@ -80,6 +80,15 @@
   <div class="sub mono spaced-sm" id="mvInfo"></div>
 </div>
 
+<div class="card ar-case" data-case="photo">
+  <h2>方式5　写真の札（切り抜き）＋動き（iPhone・iPad）</h2>
+  <div class="sub">「実物の写真で表示」の確認です。球の代わりに、写真を丸く切り抜いた札を置き、「いま」の札が円を回ります。
+    写真の代わりに、向きが分かる絵（ピンクのシール・黒い点・<b>R</b> と <b>↑</b>）を使っています。
+    <b>見てほしいこと：札が出るか／丸く切り抜かれているか（四角い背景が見えないか）／R が裏返っていないか／裏から見ても見えるか／動くか。</b></div>
+  <button id="qlPhoto" class="primary spaced">写真の札で AR を開く</button>
+  <div class="sub mono spaced-sm" id="qlPhotoInfo"></div>
+</div>
+
 <div class="card">
   <h2>結果の控え</h2>
   <div class="sub spaced-sm">各方式のカードで押した結果がここにまとまります。スクリーンショットか「コピー」で送ってください。</div>
@@ -96,6 +105,7 @@
 <script src="js/hg3d/testdata.js"></script>
 <script src="js/hg3d/reconstruct.js"></script>
 <script src="js/hg3d/meshes.js"></script>
+<script src="js/hg3d/photo.js"></script>
 <script src="js/hg3d/content.js"></script>
 <script src="js/hg3d/viewer.js"></script>
 <script src="js/hg3d/ar.js"></script>
@@ -201,6 +211,57 @@
 
   document.querySelectorAll('input[name=scale]').forEach(r => r.onchange = sizes);
 
+  /* ---------- 方式5：写真の札 ---------- */
+  /** 向きが分かる「写真」の代わりの絵（裏返し・回転に気づけるよう、R と ↑ を描く） */
+  function fakePhoto(i) {
+    const S = HG.photo.SIZE, c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d');
+    g.beginPath(); g.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); g.clip();
+    g.fillStyle = '#efeee8'; g.fillRect(0, 0, S, S);
+    g.fillStyle = '#ff3d8a'; g.beginPath(); g.arc(S / 2, S / 2, S * 0.3, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#111'; g.beginPath(); g.arc(S / 2, S / 2, S * 0.07, 0, Math.PI * 2); g.fill();
+    g.font = 'bold 30px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('R', S * 0.8, S * 0.5); g.fillText('↑', S * 0.5, S * 0.16);
+    g.font = 'bold 20px sans-serif'; g.fillText(String(i + 1), S * 0.22, S * 0.5);
+    return c;
+  }
+  let photoUrl = null;
+  async function makePhotoUsdz() {
+    /* 机の上の札：画面の右＝+x、画面の上＝奥（−z）。半径 3.5 cm（見やすさ優先） */
+    const fr = { right: { x: 0.035, y: 0, z: 0 }, up: { x: 0, y: 0, z: -0.035 }, size: 0.035 };
+    const d2 = Object.assign({}, data, {
+      photoCards: data.track.map((p, i) => ({ canvas: fakePhoto(i), fr: fr })),
+      photoNow: { canvas: fakePhoto(-1), fr: fr }
+    });
+    HG.viewer.setData(d2);
+    HG.viewer.setLayers(Object.assign({}, LAYERS, { photo: true }));
+    const info = HG.viewer.exportInfo();
+    return HG.ar.fromViewer(info, { scale: HG.ar.deskScale(info.group), kind: 'usdz', speed: 0.5 });
+  }
+  $('#qlPhoto').onclick = async () => {
+    $('#qlPhotoInfo').textContent = '作っています…';
+    try {
+      const t0 = performance.now();
+      const r = await makePhotoUsdz();
+      if (photoUrl) URL.revokeObjectURL(photoUrl);
+      photoUrl = URL.createObjectURL(r.blob);
+      $('#qlPhotoInfo').textContent = 'USDZ ' + (r.blob.size / 1024).toFixed(0) + ' KB を ' + (performance.now() - t0).toFixed(0) +
+        ' ms で作りました（1回 ' + r.seconds.toFixed(1) + ' 秒）。開いています…';
+      HG.ar.openQuickLook(photoUrl, true);
+    } catch (e) {
+      $('#qlPhotoInfo').textContent = '作れませんでした：' + e.message;
+    }
+  };
+  /* テスト用：方式5のファイル（base64） */
+  window.__photoUsdz = async () => {
+    const r = await makePhotoUsdz();
+    const buf = new Uint8Array(await r.blob.arrayBuffer());
+    let s = '';
+    for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return btoa(s);
+  };
+
   /* ---------- 結果の記録（この端末のこのブラウザにだけ残る） ---------- */
   const KEY = 'hg3d-ar-test';
   const CHOICES = [['ok', '開いた'], ['odd', '開いたが色・形が変'], ['ng', '開かない']];
@@ -226,7 +287,7 @@
 
   function summary() {
     const name = { 'file-usdz': '方式1 実ファイルUSDZ', 'file-glb': '方式2 実ファイルGLB',
-                   'blob-usdz': '方式3 その場のUSDZ', 'model-viewer': '方式4 model-viewer' };
+                   'blob-usdz': '方式3 その場のUSDZ', 'model-viewer': '方式4 model-viewer', 'photo': '方式5 写真の札' };
     const label = v => (CHOICES.filter(c => c[0] === v)[0] || [0, '未'])[1];
     const dv = window.__dev || {};
     $('#summary').textContent = [

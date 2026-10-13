@@ -197,6 +197,19 @@ async function runFlow(pg, label) {
   });
   check(label + '：Δv の倍率に 1 倍未満がある', zl.half.z === 0.5 && zl.back === 1, zl.half.label);
 
+  /* 実物の写真で表示（切り替え。既定は球） */
+  check(label + '：既定は球（写真の切り替えは OFF）', !(await pg.isChecked('#lyPhoto')));
+  await pg.check('#lyPhoto');
+  await pg.waitForFunction(() => document.querySelector('#photoInfo').textContent === '' &&
+    (() => { let n = 0; HG.viewer.content().traverse(o => { if (o.userData && o.userData.photo) n++; }); return n > 0; })(), null, { timeout: 30000 });
+  const ph = await pg.evaluate(() => { let n = 0; HG.viewer.content().traverse(o => { if (o.userData && o.userData.photo) n++; }); return { n: n, track: HG.track3d.length }; });
+  check(label + '：写真の札がストロボの点の数だけ出る', ph.n === ph.track, ph.n + ' 枚／' + ph.track + ' 点');
+  await pg.click('[data-view=top]'); await pg.waitForTimeout(1100);
+  await shot('6-photo');
+  const arp = await pg.evaluate(async () => (await HG.panel3d.arSizes()));
+  check(label + '：写真のまま AR（USDZ）が作れる', arp.usdz > 1000 && arp.samples >= 1, (arp.usdz / 1024).toFixed(0) + ' KB');
+  await pg.uncheck('#lyPhoto');
+
   /* 再生が止められる */
   await pg.click('#playBtn'); await pg.waitForTimeout(500);
   const moved = await pg.evaluate(() => +document.querySelector('#nowSlider').value);
