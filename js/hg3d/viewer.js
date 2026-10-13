@@ -124,9 +124,11 @@
       labels.push({ el: el, p: new THREE.Vector3(p.x, p.y, p.z) });
     };
     /* 軸ラベルは記号と言葉を併記する（3D仕様.md §5） */
-    add('x 水平（右）', { x: a, y: 0, z: 0 }, 'ax-x');
-    add('y 鉛直（上）', { x: 0, y: a, z: 0 }, 'ax-y');
-    add('z 水平（手前）', { x: 0, y: 0, z: a }, 'ax-z');
+    const O = HG.content.axisOrigin(built.stage);
+    add('x 水平（右）', { x: O.x + a, y: O.y, z: O.z }, 'ax-x');
+    add('y 鉛直（上）', { x: O.x, y: O.y + a, z: O.z }, 'ax-y');
+    add('z 水平（手前）', { x: O.x, y: O.y, z: O.z + a }, 'ax-z');
+    if (opts.layers.pos) add('A（基準点）', { x: 0, y: 0, z: 0 }, 'origin');
     const st = built.stage;
     if (opts.layers.wallBack) add('奥の壁', { x: (st.x0 + st.x1) / 2, y: st.top, z: st.wallBack }, 'wall');
     if (opts.layers.wallSide) add('横の壁', { x: st.wallSide, y: st.top, z: (st.z0 + st.z1) / 2 }, 'wall');

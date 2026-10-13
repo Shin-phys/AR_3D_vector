@@ -19,6 +19,9 @@
   /** 軸の長さ（ビューアのラベル位置も同じ値を使う） */
   function axisLen(ext) { return Math.max(0.08, 0.33 * ext.S); }
 
+  /** 軸を置く場所：部屋の隅（奥の壁と横の壁が出会う床の角） */
+  function axisOrigin(st) { return { x: st.wallSide, y: st.floorY, z: st.wallBack }; }
+
   /** 大きさの目安（球の半径や矢印の太さを、運動の大きさに合わせる） */
   function extent(data) {
     const pts = [].concat(data.track || [], data.trackAll || [], data.paper || []);
@@ -82,20 +85,28 @@
     floor.position.y = st.floorY;
     g.add(floor);
 
-    /* 軸（原点＝紙の角 A）。ラベルはビューアが HTML で重ねる（AR には文字を入れない） */
+    /* 軸は「向きの印」として部屋の隅（奥の壁と横の壁が出会う床の角）に置く。
+       ★ 紙の角 A に置かないこと。★ 運動のすぐそばに来て、Δv の矢印と重なった（実機）。
+       ★ 円の中心にも置かないこと。★ 中心を出すには円を当てはめることになり（答えの仮定）、
+       しかも Δv が全部軸の原点を向く絵になって、生徒が読む前に答えが見える。
+       位置ベクトルの基準（原点）は角 A のまま。そちらは小さな印で示す。
+       ラベルはビューアが HTML で重ねる（AR には文字を入れない） */
     if (L.axes !== false) {
-      const a = axisLen(ext), r = s.arrow * 0.55;   // ベクトルより細く（主役は矢印）
-      g.add(M.arrow({ x: 0, y: 0, z: 0 }, { x: a, y: 0, z: 0 }, C.axisX, r));
-      g.add(M.arrow({ x: 0, y: 0, z: 0 }, { x: 0, y: a, z: 0 }, C.axisY, r));
-      g.add(M.arrow({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: a }, C.axisZ, r));
+      const O = axisOrigin(st), a = axisLen(ext), r = s.arrow * 0.55;   // ベクトルより細く（主役は矢印）
+      g.add(M.arrow(O, { x: a, y: 0, z: 0 }, C.axisX, r));
+      g.add(M.arrow(O, { x: 0, y: a, z: 0 }, C.axisY, r));
+      g.add(M.arrow(O, { x: 0, y: 0, z: a }, C.axisZ, r));
     }
 
     const tr = data.track || [];
     /* ストロボ（使うコマの位置に球） */
     if (L.balls !== false) tr.forEach(p => g.add(M.ball(p, s.ball, C.ball)));
 
-    /* 位置ベクトル（基準点＝原点から） */
-    if (L.pos) tr.forEach(p => g.add(M.arrow({ x: 0, y: 0, z: 0 }, p, C.pos, s.arrow * 0.8, 0.85)));
+    /* 位置ベクトル（基準点＝紙の角 A から）。基準点には小さな印 */
+    if (L.pos) {
+      g.add(M.ball({ x: 0, y: 0, z: 0 }, s.ball * 0.7, '#12161c'));
+      tr.forEach(p => g.add(M.arrow({ x: 0, y: 0, z: 0 }, p, C.pos, s.arrow * 0.8, 0.85)));
+    }
 
     /* 速度（隣り合う位置の先端どうしを結ぶ＝変位。実寸） */
     const kin = data.kin || { v: [], a: [] };
@@ -180,5 +191,5 @@
            '（点の間隔 ' + (dt * 1000).toFixed(0) + ' ms' + (zoom > 1 ? '、Δv は ×' + zoom.toFixed(1) : '') + '）';
   }
 
-  HG.content = { build, extent, sizes, stage, scaleText, axisLen, makeNow, placeNow };
+  HG.content = { build, extent, sizes, stage, scaleText, axisLen, axisOrigin, makeNow, placeNow };
 })(window.HG = window.HG || {});
