@@ -119,6 +119,55 @@
     return { group: g, ext: ext, stage: st, sizes: s };
   }
 
+  /* ---------- 「いま」の球と影（動くもの） ----------
+     ビューアの時刻スライダーと、AR の動き（timeSamples）が同じものを使う。
+     別々に作ると、AR でだけ影の位置がずれる余地ができる。
+     名前は AR の書き出しで目印にする（ar.js が USDZ の中でこの名前を探す）。 */
+  function makeNow(built, layers) {
+    const M = HG.mesh, C = M.COLORS, s = built.sizes;
+    const g = new THREE.Group();
+    const named = (m, n) => { m.name = n; g.add(m); return m; };
+    const o = { group: g, r: s.arrow * 0.35, parts: [] };
+    o.ball = named(M.ball({ x: 0, y: 0, z: 0 }, s.ball * 1.25, C.ballNow), 'HGANIM_ball');
+    o.parts.push(o.ball);
+    const unitRod = () => new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8), M.mat('#12161c', 0.35));
+    if (layers.wallBack) {
+      o.shB = named(M.disc({ x: 0, y: 0, z: 0 }, s.ball * 1.1, 'z', '#12161c', 0.95), 'HGANIM_shB');
+      o.rayB = named(unitRod(), 'HGANIM_rayB');
+      o.parts.push(o.shB, o.rayB);
+    }
+    if (layers.wallSide) {
+      o.shS = named(M.disc({ x: 0, y: 0, z: 0 }, s.ball * 1.1, 'x', '#12161c', 0.95), 'HGANIM_shS');
+      o.rayS = named(unitRod(), 'HGANIM_rayS');
+      o.parts.push(o.shS, o.rayS);
+    }
+    return o;
+  }
+
+  function setRod(m, a, b, r) {
+    const v = new THREE.Vector3(b.x - a.x, b.y - a.y, b.z - a.z);
+    const L = Math.max(1e-5, v.length());
+    m.scale.set(r, L, r);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v.normalize());
+    m.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+  }
+
+  /** 「いま」を点 p に置く（影と投影の線も） */
+  function placeNow(o, p, st) {
+    o.ball.position.set(p.x, p.y, p.z);
+    if (o.shB) {
+      const q = { x: p.x, y: p.y, z: st.wallBack + 0.003 };
+      o.shB.position.set(q.x, q.y, q.z);
+      setRod(o.rayB, p, q, o.r);
+    }
+    if (o.shS) {
+      const q = { x: st.wallSide + 0.003, y: p.y, z: p.z };
+      o.shS.position.set(q.x, q.y, q.z);
+      setRod(o.rayS, p, q, o.r);
+    }
+    o.parts.forEach(m => m.updateMatrix());
+  }
+
   /** 矢印の尺度（画面に書く。3D仕様.md §5「矢印の尺度を画面に表示する」） */
   function scaleText(kin, zoom) {
     if (!kin || !kin.v.length) return '';
@@ -131,5 +180,5 @@
            '（点の間隔 ' + (dt * 1000).toFixed(0) + ' ms' + (zoom > 1 ? '、Δv は ×' + zoom.toFixed(1) : '') + '）';
   }
 
-  HG.content = { build, extent, sizes, stage, scaleText, axisLen };
+  HG.content = { build, extent, sizes, stage, scaleText, axisLen, makeNow, placeNow };
 })(window.HG = window.HG || {});

@@ -350,8 +350,9 @@
       <div id="predShown" class="pred-strip hide"></div>
 
       <div class="slider hide spaced" id="dvZoomRow">
-        <label>Δv の拡大 <span class="mono" id="dvZoomVal">×1.0（実寸）</span></label>
-        <input type="range" id="dvZoom" min="10" max="80" value="10">
+        <label>Δv の倍率 <span class="mono" id="dvZoomVal">×1（実寸）</span></label>
+        <!-- 値は段の番号。倍率は panel3d.js の ZOOMS（×0.1〜×8）。1倍未満も選べる -->
+        <input type="range" id="dvZoom" min="0" max="18" value="9">
       </div>
       <div class="sub mono spaced-sm" id="scaleNote"></div>
 
@@ -367,6 +368,12 @@
       </div>
       <div class="row tight">
         <button id="playBtn" class="grow">▶ 再生</button>
+        <select id="speedSel" title="再生の速さ（AR の動きにも使います）">
+          <option value="1">×1（実時間）</option>
+          <option value="0.5" selected>×0.5</option>
+          <option value="0.25">×0.25</option>
+          <option value="0.1">×0.1</option>
+        </select>
       </div>
 
       <div id="revealNote" class="reveal hide"></div>
@@ -376,9 +383,10 @@
       <div id="arRow" class="hide">
         <div class="sub spaced">AR（机や床に置いて回り込む）</div>
         <div class="row tight spaced-sm">
-          <label class="chk"><input type="radio" name="arScale" value="0.2" checked> 机上サイズ（1/5）</label>
+          <label class="chk"><input type="radio" name="arScale" value="desk" checked> 机上サイズ<span class="mono" id="deskVal"></span></label>
           <label class="chk"><input type="radio" name="arScale" value="1"> 実寸（1:1）</label>
         </div>
+        <label class="chk spaced-sm"><input type="checkbox" id="arMove" checked> 「いま」の球と影を動かす（速さは上の再生と同じ）</label>
         <div class="row tight spaced-sm">
           <button id="arBtn" class="grow">AR で見る</button>
         </div>

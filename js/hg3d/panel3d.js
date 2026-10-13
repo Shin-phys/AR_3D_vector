@@ -54,6 +54,7 @@
         '点がきれいに並んでいなければ、矢印も読めません。');
     }
     arDetect();
+    deskLabel();
     HG.bus.emit('view3d:opened');
     if (window.innerWidth < 900) HG.steps.goTo('#viewCard');
   }
@@ -80,6 +81,7 @@
     if (+s.value > +s.max) s.value = s.max;
     setNow(+s.value);
     scaleNote();
+    deskLabel();
   }
 
   function setNow(i) {
@@ -126,6 +128,7 @@
     if (L.wallBack || L.wallSide) seen.wall = true;
     scaleNote();
     setNow(+$('#nowSlider').value);
+    deskLabel();          // 壁を出すと中身が広がるので、机上サイズの倍率も変わる
     reveal();
   }
 
@@ -177,18 +180,19 @@
     layers();
   }
 
-  /* ---------- 再生（実時間。区間を繰り返す） ---------- */
+  /* ---------- 再生（区間を繰り返す。速さは ×1〜×0.1。AR の動きも同じ速さ） ---------- */
+  function speed() { return +$('#speedSel').value || 1; }
   function startPlay() {
     const all = HG.track3dAll || [];
     if (all.length < 2) return;
     let i = +$('#nowSlider').value;
     if (i >= all.length - 1) i = 0;
-    const tStart = all[i].t, wall0 = performance.now();
+    const tStart = all[i].t, wall0 = performance.now(), sp = speed();
     play = { raf: 0 };
     $('#playBtn').textContent = '■ 停止';
     const tick = now => {
       if (!play) return;
-      let t = tStart + (now - wall0) / 1000;
+      let t = tStart + (now - wall0) / 1000 * sp;
       const span = all[all.length - 1].t - all[0].t;
       if (t > all[all.length - 1].t) t = all[0].t + ((t - all[0].t) % span);
       let k = 0;
@@ -213,7 +217,8 @@
                  生徒はその右下の AR ボタンを押す。
        どちらも無い端末では、AR の欄ごと出さない。
      中身はビューアがいま表示しているもの（content.js が組み立てた同じ Group）。
-     「いま」の球と影は入れない（AR にアニメーションを入れない）。 */
+     「いま」の球と影は、動かす（実機で「静止画では人によって見えるものが違う」と分かったため。
+     速さは書き出すときに決める。ar.js の「動き」の節）。 */
   const ar = { mode: null, url: null, key: '' };
 
   async function arDetect() {
@@ -223,10 +228,20 @@
     return ar.mode;
   }
 
-  function arScale() { const r = document.querySelector('input[name=arScale]:checked'); return r ? +r.value : 0.2; }
-
-  /** いま表示している中身を、書き出し用の場面にする */
-  function arScene(scale) { return HG.ar.exportScene(HG.viewer.content(), scale); }
+  /** 机上サイズは中身の大きさから決める（ar.js deskScale）。実寸は 1 */
+  function arScale() {
+    const r = document.querySelector('input[name=arScale]:checked');
+    if (r && r.value === '1') return { k: 1, desk: false };
+    return { k: HG.viewer.content() ? HG.ar.deskScale(HG.viewer.content()) : 1, desk: true };
+  }
+  function deskLabel() {
+    if (!HG.viewer.content()) return;
+    HG.dom.text('#deskVal', '（この運動では ×' + HG.ar.deskScale(HG.viewer.content()) + '）');
+  }
+  function arOpts(kind) {
+    const s = arScale();
+    return { scale: s.k, desk: s.desk, kind: kind, speed: $('#arMove').checked ? speed() : 0 };
+  }
 
   async function arOpen() {
     const btn = $('#arBtn');
@@ -234,31 +249,34 @@
     btn.disabled = true;
     HG.dom.text('#arInfo', 'AR 用のモデルを作っています…');
     try {
-      const sc = arScale();
+      const info = HG.viewer.exportInfo();
       if (ar.mode === 'quicklook') {
+        const o = arOpts('usdz');
         const t0 = performance.now();
-        const blob = await HG.ar.toUSDZ(arScene(sc));
+        const r = await HG.ar.fromViewer(info, o);
         if (ar.url) URL.revokeObjectURL(ar.url);
-        ar.url = URL.createObjectURL(blob);
-        const what = (sc === 1 ? '実寸' : '机上サイズ（1/5）');
+        ar.url = URL.createObjectURL(r.blob);
+        const what = (o.desk ? '机上サイズ（×' + o.scale + '）' : '実寸') +
+          (r.seconds ? '・動きつき（1回 ' + r.seconds.toFixed(1) + ' 秒、×' + o.speed + '）' : '');
         /* ★ 作るのに時間がかかったら、自動では開かない。★
            Safari は「指で押した直後」でないと Quick Look を開かないことがある。
            ar-test.html（方式3）は数百 ms で作れて通ったが、壁や矢印を全部出すと重くなる。
            間に合わなかったときは、本物の <a rel="ar"> を出して、もう一度押してもらう。 */
         if (performance.now() - t0 < 900) {
-          HG.ar.openQuickLook(ar.url);
-          HG.dom.text('#arInfo', what + 'で開きました。表示（速度・Δv・影）を変えたら、もう一度押すとその表示で開き直します。');
+          HG.ar.openQuickLook(ar.url, o.desk);
+          HG.dom.text('#arInfo', what + 'で開きました。表示や速さを変えたら、もう一度押すとその表示で開き直します。');
         } else {
           HG.dom.html('#arInfo', what + 'の準備ができました。<a rel="ar" class="ar-link spaced-sm" href="' + ar.url +
-            '#allowsContentScaling=0"><img src="ar-test/thumb.png" alt="" width="48" height="36"><span>ここを押して AR で開く</span></a>');
+            '#allowsContentScaling=' + (o.desk ? 1 : 0) + '"><img src="ar-test/thumb.png" alt="" width="48" height="36"><span>ここを押して AR で開く</span></a>');
         }
       } else {
-        const blob = await HG.ar.toGLB(arScene(sc));
+        const o = arOpts('glb');
+        const r = await HG.ar.fromViewer(info, o);
         if (ar.url) URL.revokeObjectURL(ar.url);
-        ar.url = URL.createObjectURL(blob);
-        await HG.ar.modelViewer($('#arHost'), ar.url, { height: '260px' });
+        ar.url = URL.createObjectURL(r.blob);
+        await HG.ar.modelViewer($('#arHost'), ar.url, { height: '260px', autoplay: r.seconds > 0 });
         HG.dom.html('#arInfo', '下の枠の<b>右下の AR ボタン</b>を押すと、カメラの映像に置けます。' +
-          '表示を変えたら「AR で見る」を押し直してください。');
+          '表示や速さを変えたら「AR で見る」を押し直してください。');
       }
     } catch (e) {
       HG.dom.text('#arInfo', 'AR のモデルを作れませんでした：' + e.message);
@@ -266,12 +284,22 @@
     btn.disabled = false;
   }
 
-  /** テスト用：いまの中身から作った USDZ と GLB の大きさ */
-  async function arSizes(scale) {
-    const s = arScene(scale || 0.2);
-    const u = await HG.ar.toUSDZ(s), g = await HG.ar.toGLB(s);
-    return { usdz: u.size, glb: g.size };
+  /** テスト用：いまの表示から作った USDZ と GLB（動きつき）の大きさと、USDZ の中身の確認 */
+  async function arSizes() {
+    const info = HG.viewer.exportInfo();
+    const u = await HG.ar.fromViewer(info, Object.assign(arOpts('usdz'), { speed: 0.5 }));
+    const g = await HG.ar.fromViewer(info, Object.assign(arOpts('glb'), { speed: 0.5 }));
+    const files = THREE.fflate.unzipSync(new Uint8Array(await u.blob.arrayBuffer()));
+    const usda = THREE.fflate.strFromU8(files['model.usda']);
+    return { usdz: u.blob.size, glb: g.blob.size, seconds: u.seconds, desk: arScale().k,
+             samples: (usda.match(/timeSamples/g) || []).length, end: /endTimeCode = [0-9.]+/.test(usda),
+             first: Object.keys(files)[0] };
   }
+
+  /* Δv の倍率の段。**1倍未満も選べる**（実機の指摘：お手本の円運動では実寸の Δv が
+     長すぎて中心を越えそうになる。点の間隔が広いと Δv は間隔の2乗で伸びるため）。
+     倍率は全体で1つ（2D の README「Δv の倍率はアプリ全体で1つ」と同じ考え方） */
+  const ZOOMS = [0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
 
   /* ---------- 書き出し ---------- */
   function csv3d() {
@@ -301,8 +329,8 @@
     $('#lyDv').onchange = onDv;
     $('#predGate').onclick = e => { const b = e.target.closest('[data-id]'); if (b) answer(b.dataset.id); };
     $('#dvZoom').oninput = e => {
-      const z = +e.target.value / 10;
-      HG.dom.text('#dvZoomVal', '×' + z.toFixed(1) + (z === 1 ? '（実寸）' : ''));
+      const z = ZOOMS[+e.target.value] || 1;
+      HG.dom.text('#dvZoomVal', '×' + z + (z === 1 ? '（実寸）' : z < 1 ? '（縮小）' : '（拡大）'));
       HG.viewer.setZoom(z);
       setNow(+$('#nowSlider').value);
       scaleNote();
@@ -311,6 +339,7 @@
     $('#playBtn').onclick = () => (play ? stopPlay() : startPlay());
     $('#csv3d').onclick = csv3d;
     $('#arBtn').onclick = arOpen;
+    $('#speedSel').onchange = () => { if (play) { stopPlay(); startPlay(); } };
     HG.graph.attach($('#graph'), i => { stopPlay(); setNow(i); });
 
     /* 前半を触り直したら作り直す（開いているときだけ） */

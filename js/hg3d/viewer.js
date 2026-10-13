@@ -96,28 +96,10 @@
     setNow(opts.now);
   }
 
-  /** 「いま」の球と、壁へ落ちる影・投影の線（位置だけ動かす） */
+  /** 「いま」の球と、壁へ落ちる影・投影の線（位置だけ動かす。部品は content.js） */
   function makeNow() {
-    const M = HG.mesh, C = M.COLORS, s = built.sizes;
-    const g = new THREE.Group();
-    const ball = M.ball({ x: 0, y: 0, z: 0 }, s.ball * 1.25, C.ballNow);
-    const shB = M.disc({ x: 0, y: 0, z: 0 }, s.ball * 1.1, 'z', '#12161c', 0.95);
-    const shS = M.disc({ x: 0, y: 0, z: 0 }, s.ball * 1.1, 'x', '#12161c', 0.95);
-    const rayB = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8), M.mat('#12161c', 0.35));
-    const rayS = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8), M.mat('#12161c', 0.35));
-    g.add(ball, shB, shS, rayB, rayS);
-    scene.add(g);
-    nowObjs = { group: g, ball: ball, shB: shB, shS: shS, rayB: rayB, rayS: rayS, r: s.arrow * 0.35 };
-  }
-
-  function setRod(m, a, b, r) {
-    const v = new THREE.Vector3(b.x - a.x, b.y - a.y, b.z - a.z);
-    const L = v.length();
-    m.visible = L > 1e-6;
-    if (!m.visible) return;
-    m.scale.set(r, L, r);
-    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v.normalize());
-    m.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    nowObjs = HG.content.makeNow(built, opts.layers);
+    scene.add(nowObjs.group);
   }
 
   /** 時刻スライダー。i は trackAll（区間内の全コマ）の番号 */
@@ -125,21 +107,7 @@
     opts.now = i;
     if (!nowObjs || !data || !data.trackAll || !data.trackAll.length) return;
     const all = data.trackAll;
-    const p = all[Math.max(0, Math.min(all.length - 1, i))];
-    const st = built.stage, L = opts.layers, o = nowObjs;
-    o.ball.position.set(p.x, p.y, p.z);
-    o.shB.visible = o.rayB.visible = !!L.wallBack;
-    o.shS.visible = o.rayS.visible = !!L.wallSide;
-    if (L.wallBack) {
-      const q = { x: p.x, y: p.y, z: st.wallBack + 0.003 };
-      o.shB.position.set(q.x, q.y, q.z);
-      setRod(o.rayB, p, q, o.r);
-    }
-    if (L.wallSide) {
-      const q = { x: st.wallSide + 0.003, y: p.y, z: p.z };
-      o.shS.position.set(q.x, q.y, q.z);
-      setRod(o.rayS, p, q, o.r);
-    }
+    HG.content.placeNow(nowObjs, all[Math.max(0, Math.min(all.length - 1, i))], built.stage);
   }
 
   /* ---------- 文字（HTML で重ねる） ---------- */
@@ -282,7 +250,10 @@
   /** テスト・書き出し用：いま表示している中身 */
   function content() { return built && built.group; }
 
-  HG.viewer = { attach, fit, setData, setLayers, setZoom, setNow, view, start, stop,
+  /** AR の書き出し用：いまの中身・寸法・データ（動きを作るのに要る） */
+  function exportInfo() { return built && built.ext ? { group: built.group, built: built, data: data, layers: opts.layers } : null; }
+
+  HG.viewer = { attach, fit, setData, setLayers, setZoom, setNow, view, start, stop, exportInfo,
                 rebuild, content, opts: opts,
                 _internals: () => ({ renderer, scene, camera, controls, built }) };
 })(window.HG = window.HG || {});

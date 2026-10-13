@@ -176,10 +176,26 @@ async function runFlow(pg, label) {
   /* AR：この端末（headless）は Quick Look も WebXR も無いので欄ごと隠れる。
      中身から USDZ・GLB が作れることだけ確かめる（実機で開くかは ar-test.html で確認済み） */
   const arv = await pg.evaluate(async () => ({ mode: HG.panel3d.arMode(),
-    hidden: document.querySelector('#arRow').classList.contains('hide'), sz: await HG.panel3d.arSizes(0.2) }));
+    hidden: document.querySelector('#arRow').classList.contains('hide'), sz: await HG.panel3d.arSizes() }));
   check(label + '：AR 非対応の端末では AR の欄が出ない', arv.mode === '' && arv.hidden);
-  check(label + '：いまの表示から USDZ と GLB が作れる', arv.sz.usdz > 1000 && arv.sz.glb > 1000,
+  check(label + '：いまの表示から USDZ と GLB（動きつき）が作れる', arv.sz.usdz > 1000 && arv.sz.glb > 1000,
         'USDZ ' + (arv.sz.usdz / 1024).toFixed(0) + ' KB ／ GLB ' + (arv.sz.glb / 1024).toFixed(0) + ' KB');
+  /* 奥の壁を出しているので、動くのは「いま」の球・影・投影の線の3つ */
+  check(label + '：USDZ に動き（timeSamples）が入り、model.usda が先頭', arv.sz.samples === 3 && arv.sz.end && arv.sz.first === 'model.usda',
+        'timeSamples ' + arv.sz.samples + ' 本、1回 ' + arv.sz.seconds.toFixed(2) + ' 秒（×0.5）');
+  check(label + '：机上サイズは中身が約 45 cm になる倍率', arv.sz.desk > 0.3 && arv.sz.desk <= 4, '×' + arv.sz.desk);
+
+  /* Δv の倍率は 1 倍未満も選べる（×0.5 で矢印の長さが半分） */
+  const zl = await pg.evaluate(() => {
+    const len = () => { const g = HG.viewer.content(); let n = 0; g.traverse(o => { if (o.isMesh && o.geometry.type === 'ConeGeometry' && o.material.color.getHexString() === 'ff7a00') n += o.parent.position.length() * 0 + 1; }); return n; };
+    const s = document.querySelector('#dvZoom');
+    const L = () => HG.kin3d.a.map(a => Math.hypot(a.d2.x, a.d2.z));
+    s.value = 5; s.dispatchEvent(new Event('input'));
+    const half = { z: HG.viewer.opts.dvZoom, label: document.querySelector('#dvZoomVal').textContent };
+    s.value = 9; s.dispatchEvent(new Event('input'));
+    return { half: half, back: HG.viewer.opts.dvZoom, min: +s.min, max: +s.max };
+  });
+  check(label + '：Δv の倍率に 1 倍未満がある', zl.half.z === 0.5 && zl.back === 1, zl.half.label);
 
   /* 再生が止められる */
   await pg.click('#playBtn'); await pg.waitForTimeout(500);
