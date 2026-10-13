@@ -41,7 +41,10 @@
   const PAPERS = {
     A4: { w: 0.297, h: 0.210, name: 'A4' },
     B5: { w: 0.257, h: 0.182, name: 'B5' },
-    A3: { w: 0.420, h: 0.297, name: 'A3' }
+    A3: { w: 0.420, h: 0.297, name: 'A3' },
+    /* ボードの投射は軌道が A4 の3倍に広がり、紙の外で誤差がふくらむ（tools/test/unit.js）。
+       大きな基準として、模造紙（788×1091 mm）を半分に切ったもの */
+    HALF: { w: 0.788, h: 0.545, name: '模造紙の半分' }
   };
 
   const S = {
@@ -52,22 +55,36 @@
     Hinv: null,
     s: 1,                 // 時計回りなら +1（z = +Y）
     ex: null,             // 画面の右に当たる水平の向き（回す前の 3D で）
-    pose: null
+    pose: null,
+    /* ★ 紙を置いた面。'horizontal'（机・床）／'vertical'（壁・ボード）★
+       鉛直な面では、紙の面の中のどちらが「下」かを決める必要がある。
+       おもりを吊るした糸の上と下を押してもらう（plumb）。糸が無ければ
+       「画面の下」を下とみなす（スマホが傾いていればそのぶんずれる）。
+       糸は本物の鉛直なので、アプリが「下」を仮定せずに済む。 */
+    plane: 'horizontal',
+    plumb: [],            // 糸の2点（画像上の実位置。上→下）
+    plumbFrame: null,
+    down: null,           // 紙の座標で、鉛直下向きの単位ベクトル {x, y}
+    right: null,          // 紙の座標で、水平・画面右向きの単位ベクトル {x, y}
+    downSource: ''        // 'plumb' | 'image'
   };
 
   /* ---------- 四隅 ---------- */
 
-  /** カメラぶれ補正を、四隅にも点と同じだけ掛ける（points.applyCorrection と同じ式） */
-  function correctedCorners() {
-    if (S.corners.length !== 4) return null;
+  /** カメラぶれ補正を、四隅（や糸）にも点と同じだけ掛ける（points.applyCorrection と同じ式） */
+  function corrected(list, frame) {
     let dx = 0, dy = 0;
     const st = HG.state;
-    if (st && st.tracking && st.tracking.useMarker && st.refMarker && S.cornerFrame !== null) {
+    if (st && st.tracking && st.tracking.useMarker && st.refMarker && frame !== null) {
       const base = st.refMarker.find(m => m && m.found);
-      const m = st.refMarker[S.cornerFrame];
+      const m = st.refMarker[frame];
       if (base && m && m.found) { dx = m.x - base.x; dy = m.y - base.y; }
     }
-    return S.corners.map(c => ({ x: c.x - dx, y: c.y - dy }));
+    return list.map(c => ({ x: c.x - dx, y: c.y - dy }));
+  }
+  function correctedCorners() {
+    if (S.corners.length !== 4) return null;
+    return corrected(S.corners, S.cornerFrame);
   }
 
   /** 四隅と紙の寸法から射影変換を作り直す。失敗したら理由を返す */
@@ -90,8 +107,32 @@
     const a = raw(c0.x, c0.y), b = raw(c0.x + step, c0.y);
     const l = Math.hypot(b.x - a.x, b.z - a.z);
     S.ex = l > 0 ? { x: (b.x - a.x) / l, z: (b.z - a.z) / l } : { x: 1, z: 0 };
+
+    /* 鉛直な面：紙の座標での「下」と「右」 */
+    S.down = S.right = null; S.downSource = '';
+    const P = (u, v) => HG.geom.apply(S.Hinv, u, v);
+    const unit = (p, q) => { const L = Math.hypot(q.x - p.x, q.y - p.y) || 1; return { x: (q.x - p.x) / L, y: (q.y - p.y) / L }; };
+    if (S.plane === 'vertical') {
+      if (S.plumb.length === 2) {
+        const pl = corrected(S.plumb, S.plumbFrame);
+        S.down = unit(P(pl[0].x, pl[0].y), P(pl[1].x, pl[1].y));
+        S.downSource = 'plumb';
+      } else {
+        S.down = unit(P(c0.x, c0.y), P(c0.x, c0.y + step));
+        S.downSource = 'image';
+      }
+      const r = unit(P(c0.x, c0.y), P(c0.x + step, c0.y));
+      const k = r.x * S.down.x + r.y * S.down.y;
+      S.right = (() => { const v = { x: r.x - k * S.down.x, y: r.y - k * S.down.y }; const L = Math.hypot(v.x, v.y) || 1; return { x: v.x / L, y: v.y / L }; })();
+    }
     if (W && Hh) S.pose = HG.geom.pose(H, W, Hh);
     return { ok: true };
+  }
+
+  function setPlane(p) { S.plane = p === 'vertical' ? 'vertical' : 'horizontal'; }
+  function setPlumb(list, frameIndex) {
+    S.plumb = (list || []).map(p => ({ x: p.x, y: p.y }));
+    S.plumbFrame = list && list.length ? frameIndex : null;
   }
 
   function setCorners(list, frameIndex) {
@@ -99,7 +140,7 @@
     S.cornerFrame = frameIndex;
   }
   function clearCorners() {
-    S.corners = []; S.cornerFrame = null; S.H = S.Hinv = S.pose = null;
+    S.corners = []; S.cornerFrame = null; S.H = S.Hinv = S.pose = null; S.down = S.right = null;
   }
   function ready() { return !!S.Hinv; }
 
@@ -112,10 +153,34 @@
     return { x: p.x * e.x + p.z * e.z, y: p.y, z: -p.x * e.z + p.z * e.x };
   }
 
+  /**
+   * 鉛直な面：紙の座標 (X, Y, 法線方向の高さ) → 3D。
+   * x = 右向きの成分、y = 上向きの成分（下の逆）、z = カメラ側への高さ。
+   * 画面の右と上は鏡に映っていない組なので、x × y は必ずカメラの側を向く。
+   * 時計回りに押したとき紙の法線 X×Y はカメラから遠ざかる向き（水平の面と同じ理屈）なので、
+   * カメラ側への高さは −s·c。
+   */
+  function vert(a, b, c) {
+    const r = S.right, d = S.down;
+    return { x: a * r.x + b * r.y, y: -(a * d.x + b * d.y), z: -S.s * c };
+  }
+
   /** 画像座標（補正後）→ 3D（m） */
-  function toWorld(u, v) { return turn(raw(u, v)); }
+  function toWorld(u, v) {
+    if (S.plane === 'vertical' && S.down) { const p = HG.geom.apply(S.Hinv, u, v); return vert(p.x, p.y, 0); }
+    return turn(raw(u, v));
+  }
   /** 紙の座標 (X, Y, 法線方向の高さ) → 3D */
-  function planeToWorld(a, b, c) { return turn(raw0(a, b, c)); }
+  function planeToWorld(a, b, c) {
+    if (S.plane === 'vertical' && S.down) return vert(a, b, c);
+    return turn(raw0(a, b, c));
+  }
+
+  /** 糸の2点（3D）。描くため */
+  function plumbWorld() {
+    if (S.plumb.length !== 2 || !S.Hinv) return null;
+    return corrected(S.plumb, S.plumbFrame).map(p => toWorld(p.x, p.y));
+  }
 
   /** 紙の四隅（3D） */
   function paperWorld() {
@@ -204,7 +269,7 @@
     return { longPx: longPx, shortPx: shortPx, errPct: 2 / shortPx * 100 };
   }
 
-  HG.recon = { state: S, PAPERS, setCorners, clearCorners, solve, ready, toWorld,
+  HG.recon = { state: S, PAPERS, setCorners, clearCorners, solve, setPlane, setPlumb, plumbWorld, ready, toWorld,
                planeToWorld, paperWorld, cameraWorld, computeFrom, compute,
                correctedCorners, precision };
 })(typeof window !== 'undefined' ? (window.HG = window.HG || {}) : (globalThis.HG = globalThis.HG || {}));

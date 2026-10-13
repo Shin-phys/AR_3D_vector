@@ -23,7 +23,8 @@
 
   function data() {
     return { track: HG.track3d || [], trackAll: HG.track3dAll || [], kin: HG.kin3d || { v: [], a: [] },
-             paper: HG.recon.ready() ? HG.recon.paperWorld() : null };
+             paper: HG.recon.ready() ? HG.recon.paperWorld() : null,
+             plane: HG.recon.state.plane, plumb: HG.recon.plumbWorld() };
   }
 
   /** 3D を開ける状態か。開けないなら理由 */
@@ -74,6 +75,10 @@
     if (!open) return;
     if (blocker()) { back2d(); HG.dom.html('#viewHint', '<span class="warn">' + blocker() + '</span>'); return; }
     HG.recon.compute();
+    planeOptions();
+    quality();
+    HG.viewer.opts.layers.wallBack = $('#lyWallBack').checked;
+    HG.viewer.opts.layers.floor = $('#lyFloor').checked;
     const d = data();
     HG.viewer.setData(d);
     const s = $('#nowSlider');
@@ -98,11 +103,44 @@
 
   function drawGraph() {
     const L = HG.viewer.opts.layers;
-    const on = !!(L.wallBack || L.wallSide);
+    const vert = HG.recon.state.plane === 'vertical';
+    const which = vert ? { floor: !!L.floor, side: !!L.wallSide } : { back: !!L.wallBack, side: !!L.wallSide };
+    const on = Object.keys(which).some(k => which[k]);
     $('#graphCard').classList.toggle('hide', !on || !open);
     if (!on || !open) return;
-    HG.dom.html('#graphLegend', HG.graph.legend({ back: L.wallBack, side: L.wallSide }));
-    HG.graph.draw(HG.track3dAll, HG.track3d, { back: L.wallBack, side: L.wallSide }, +$('#nowSlider').value);
+    HG.graph.setPlane(HG.recon.state.plane);
+    HG.dom.html('#graphLegend', HG.graph.legend(which));
+    HG.graph.draw(HG.track3dAll, HG.track3d, which, +$('#nowSlider').value);
+  }
+
+  /**
+   * 軌道が基準の紙よりずっと広いと、紙の外で誤差がふくらむ（四隅の数 px のずれが引き伸ばされる）。
+   * 合成データで測った：ボードの投射を A4 で測ると、5点で Δv の向きのずれが中央値 5.0°、
+   * 模造紙の半分なら 1.5°（tools/test/unit.js）。広がりが紙の 1.8 倍を超えたら知らせる。
+   */
+  function quality() {
+    const all = HG.track3dAll || [], pw = HG.recon.ready() ? HG.recon.paperWorld() : null;
+    let msg = '';
+    if (pw && all.length > 2) {
+      const span = pts => { let m = 0; pts.forEach(a => pts.forEach(b => { m = Math.max(m, Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z)); })); return m; };
+      const step = Math.max(1, Math.floor(all.length / 40));
+      const ratio = span(all.filter((p, i) => i % step === 0)) / span(pw);
+      if (ratio > 1.8) {
+        msg = '<span class="warn">軌道が基準の紙の約 ' + ratio.toFixed(1) + ' 倍に広がっています。</span>' +
+          '紙の外ほど誤差が大きくなります（合成データの見積もり：ボードの投射を A4 で測ると、5点で Δv の向きのずれが中央値 5°。' +
+          '模造紙の半分なら 1.5°）。矢印の向きが乱れて見えたら、大きな紙で撮り直すか、点の数を減らしてください。';
+      }
+    }
+    $('#qualityNote').classList.toggle('hide', !msg);
+    HG.dom.html('#qualityNote', msg);
+  }
+
+  /** 面の向きで、出す影の選択肢を入れ替える（ボードの運動では奥の壁＝ボードなので出さない） */
+  function planeOptions() {
+    const vert = HG.recon.state.plane === 'vertical';
+    $('#lyWallBackL').classList.toggle('hide', vert);
+    $('#lyFloorL').classList.toggle('hide', !vert);
+    if (vert) $('#lyWallBack').checked = false; else $('#lyFloor').checked = false;
   }
 
   function scaleNote() {
@@ -120,12 +158,13 @@
     const L = {
       balls: $('#lyBalls').checked, paper: $('#lyPaper').checked, grid: $('#lyPaper').checked,
       pos: $('#lyPos').checked, vel: $('#lyVel').checked, dv: $('#lyDv').checked,
-      wallBack: $('#lyWallBack').checked, wallSide: $('#lyWallSide').checked
+      wallBack: $('#lyWallBack').checked, wallSide: $('#lyWallSide').checked,
+      floor: $('#lyFloor').checked, arrowSh: $('#lyArrowSh').checked
     };
     HG.viewer.setLayers(L);
     $('#dvZoomRow').classList.toggle('hide', !L.dv);
     if (L.dv) seen.dv = true;
-    if (L.wallBack || L.wallSide) seen.wall = true;
+    if (L.wallBack || L.wallSide || L.floor) seen.wall = true;
     scaleNote();
     setNow(+$('#nowSlider').value);
     deskLabel();          // 壁を出すと中身が広がるので、机上サイズの倍率も変わる
@@ -325,7 +364,7 @@
     $('#open3d').onclick = show3d;
     $('#back2d').onclick = back2d;
     $('#viewBtns').onclick = e => { const b = e.target.closest('[data-view]'); if (b) setView(b.dataset.view); };
-    ['#lyBalls', '#lyPaper', '#lyPos', '#lyVel', '#lyWallBack', '#lyWallSide'].forEach(s => { $(s).onchange = layers; });
+    ['#lyBalls', '#lyPaper', '#lyPos', '#lyVel', '#lyWallBack', '#lyWallSide', '#lyFloor', '#lyArrowSh'].forEach(s => { $(s).onchange = layers; });
     $('#lyDv').onchange = onDv;
     $('#predGate').onclick = e => { const b = e.target.closest('[data-id]'); if (b) answer(b.dataset.id); };
     $('#dvZoom').oninput = e => {

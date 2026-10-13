@@ -39,6 +39,8 @@
     t.markerStart = null;
     if (p.count) HG.state.selection.count = p.count;
     $('#selCount').value = HG.state.selection.count;
+    /* 紙を置いた面。自由測定は生徒が選ぶ（いまの選択のまま） */
+    if (p.plane) HG.corners.setPlane(p.plane);
     HG.panel3d.reset();
     /* preset.note（解説）はここでは出さない。shootTips だけ */
     HG.dom.html('#presetNote', '<div class="lead">' + p.name + '</div>' +
@@ -70,7 +72,13 @@
     ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
     ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hot'); }));
     drop.addEventListener('drop', e => { const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) start(f); });
-    $('#sampleBtn').onclick = () => { const s = sample(HG.state.preset); if (s) start(s); };
+    $('#sampleBtn').onclick = () => {
+      const p = HG.state.preset, s = sample(p);
+      if (!s) return;
+      /* お手本は答えの寸法の紙で撮ってある */
+      if (p.samplePaper) HG.corners.setPaperBy(p.samplePaper);
+      start(s);
+    };
     $('#goHome').onclick = () => {
       const dirty = HG.state.frames.length > 0;
       if (dirty && !confirm('最初の画面（運動を選ぶ）に戻ります。\n読み込んだ動画と、追跡・四隅の結果は消えます。よろしいですか？')) return;

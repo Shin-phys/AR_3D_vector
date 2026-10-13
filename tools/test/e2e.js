@@ -47,7 +47,7 @@ async function runFlow(pg, label) {
 
   await pg.goto(pg.__base + '3d.html');
   const tiles = await pg.$$eval('#tiles .tile', b => b.map(x => ({ id: x.dataset.id, dis: x.disabled })));
-  check(label + '：タイル3枚（準備中2枚は押せない）', tiles.length === 3 && tiles.filter(t => t.dis).length === 2,
+  check(label + '：タイル4枚（準備中1枚は押せない）', tiles.length === 4 && tiles.filter(t => t.dis).length === 1,
         tiles.map(t => t.id + (t.dis ? '(準備中)' : '')).join(' '));
   await shot('0-tiles');
   await pg.click('[data-id=turntable]');
@@ -228,6 +228,88 @@ async function runFlow(pg, label) {
   check(label + '：エラーなし', !errs.length, errs.slice(0, 3).join(' | '));
 }
 
+/* ===== ボードに沿った投射（鉛直な面）===== */
+const truthT = JSON.parse(fs.readFileSync(path.join(ROOT, 'samples/throw.json'), 'utf8'));
+async function throwFlow(pg, label) {
+  const errs = [];
+  pg.on('pageerror', e => errs.push(e.message));
+  pg.on('response', r => { if (r.status() >= 400 && !/favicon/.test(r.url())) errs.push(r.status() + ' ' + r.url()); });
+  const shot = async name => { if (SHOTS) await pg.screenshot({ path: path.join(OUT, label + '-' + name + '.png'), fullPage: false }); };
+  await pg.goto(pg.__base + '3d.html');
+  await pg.click('[data-id=throw]');
+  await pg.click('#sampleBtn');
+  await pg.waitForSelector('#screen2:not(.hide)', { timeout: 60000 });
+  await pg.waitForFunction(() => HG.state.frames.length > 20 && HG.state.frames.every(f => typeof f.t === 'number'));
+  const st0 = await pg.evaluate(() => ({ plane: HG.recon.state.plane, paper: HG.recon.state.paper.w,
+    box: !document.querySelector('#plumbBox').classList.contains('hide') }));
+  check(label + '：投射のタイルで面が「鉛直」・紙が模造紙の半分・糸の欄が出る', st0.plane === 'vertical' && Math.abs(st0.paper - 0.788) < 1e-6 && st0.box);
+  /* トリム：投げた瞬間〜落ちる手前。コマ番号ではなく時刻で探す
+     （走査でコマが落ちることがあり、番号は動画のコマ番号と一致しない） */
+  const near = await pg.evaluate(([a, b]) => {
+    const fr = HG.state.frames, t0 = fr[0].t;
+    const at = t => fr.reduce((k, f, i) => Math.abs(f.t - t0 - t) < Math.abs(fr[k].t - t0 - t) ? i : k, 0);
+    return [at(a + 0.02), at(b - 0.02)];
+  }, [truthT.launchT, truthT.landT]);
+  await pg.evaluate(i => HG.frames.showFrame(i), near[0]); await pg.click('#setIn');
+  await pg.evaluate(i => HG.frames.showFrame(i), near[1]); await pg.click('#setOut');
+  await pg.waitForFunction(i => HG.ui.current === i, near[0]);
+  /* 四隅 */
+  await pg.click('#cornerStart'); await pg.waitForTimeout(800);
+  for (let i = 0; i < 4; i++) { const c = truthT.corners_t0[i]; await tapAt(pg, c[0], c[1]); await pg.click('#cornerDecide'); }
+  const noPlumb = await pg.evaluate(() => HG.recon.state.downSource);
+  check(label + '：糸を押す前は「画面の下」を下とみなす', noPlumb === 'image');
+  /* 糸の2点 */
+  await pg.click('#plumbStart'); await pg.waitForTimeout(800);
+  for (let i = 0; i < 2; i++) { const c = truthT.plumb[i]; await tapAt(pg, c[0], c[1]); await pg.click('#cornerDecide'); }
+  const pl = await pg.evaluate(() => ({ src: HG.recon.state.downSource, info: document.querySelector('#plumbInfo').textContent }));
+  check(label + '：糸で鉛直を決めた', pl.src === 'plumb', pl.info.slice(0, 40));
+  await shot('t2-plumb');
+  /* 色 → 追跡 */
+  /* 投げる前のコマ（ボールが止まっている）で色を選ぶ */
+  await pg.evaluate(() => HG.frames.showFrame(0));
+  await pg.click('#pickColor');
+  await tapAt(pg, truthT.ball_t0[0], truthT.ball_t0[1]);
+  await pg.click('#pickDecide');
+  await pg.click('#runTrack');
+  await pg.waitForSelector('#trackAskRow:not(.hide)', { timeout: 60000 });
+  const rep = await pg.evaluate(() => HG.state.tracking.report);
+  check(label + '：投射を自動追跡（見失い 2 コマ以下）', rep && rep.lost.length <= 2, rep ? rep.tracked + '/' + rep.total : '');
+  await pg.click('#trackOk');
+  const n = await pg.evaluate(() => HG.selection.list().filter(f => f.found).length);
+  check(label + '：使うコマは 5 点前後（投射の既定）', n >= 4 && n <= 6, n + ' 点');
+  await pg.click('#open3d'); await pg.waitForTimeout(1600);
+  const r = await pg.evaluate(() => {
+    const ang = HG.kin3d.a.map(a => Math.atan2(Math.hypot(a.d2.x, a.d2.z), -a.d2.y) * 180 / Math.PI);
+    const vx = HG.kin3d.v.map(v => v.vx);
+    const g = HG.kin3d.a.reduce((s, a) => s - a.ay, 0) / HG.kin3d.a.length;
+    return { worst: Math.max.apply(null, ang), na: ang.length, vxs: (Math.max(...vx) - Math.min(...vx)) / Math.abs(vx[0]) * 100, g: g,
+             back: !document.querySelector('#lyWallBackL').classList.contains('hide'), floor: !document.querySelector('#lyFloorL').classList.contains('hide') };
+  });
+  check(label + '：実際に追跡した投射で Δv が鉛直下向き ±5°', r.worst <= 5, r.na + ' 本、最大 ' + r.worst.toFixed(2) + '°');
+  check(label + '：水平の速度がほぼ一定（5% 以内）', r.vxs <= 5, r.vxs.toFixed(1) + '%');
+  check(label + '：Δv÷Δt ≒ g（ボードの手前 3.5 cm のぶん少し大きい見積もり）', Math.abs(r.g - 9.8) / 9.8 < 0.06, r.g.toFixed(2) + ' m/s²');
+  check(label + '：影の選択肢は「床」と「横の壁」（奥の壁＝ボードは出さない）', !r.back && r.floor);
+  await shot('t6-oblique');
+  /* 床と横の壁に影、矢印の影も */
+  await pg.check('#lyVel');
+  await pg.evaluate(() => { const c = document.querySelector('#lyDv'); c.checked = true; c.dispatchEvent(new Event('change')); });
+  await pg.check('#lyFloor'); await pg.check('#lyWallSide');
+  await pg.waitForTimeout(300);
+  const g2 = await pg.evaluate(() => ({ card: !document.querySelector('#graphCard').classList.contains('hide'),
+    legend: document.querySelector('#graphLegend').textContent,
+    /* Δv の床の影（橙・半透明）の長さ：ほぼゼロのはず */
+    floorDv: HG.kin3d.a.map(a => Math.hypot(a.d2.x, a.d2.z) / Math.hypot(a.d2.x, a.d2.y, a.d2.z)) }));
+  check(label + '：グラフは床の影（x）と横の壁の影（y）', g2.card && /床の影/.test(g2.legend) && /鉛直/.test(g2.legend), g2.legend);
+  check(label + '：Δv の床の影はほぼ点（水平成分が全体の 10% 未満）', g2.floorDv.every(v => v < 0.1),
+        '最大 ' + (Math.max.apply(null, g2.floorDv) * 100).toFixed(1) + '%');
+  await pg.click('[data-view=oblique]'); await pg.waitForTimeout(1100);
+  await shot('t6-shadows');
+  if (SHOTS) { const el = await pg.$('#graphCard'); await el.screenshot({ path: path.join(OUT, label + '-t6-graph.png') }); }
+  const arv = await pg.evaluate(async () => (await HG.panel3d.arSizes()));
+  check(label + '：投射でも AR（動きつき）が作れる', arv.usdz > 1000 && arv.samples >= 3, 'timeSamples ' + arv.samples);
+  check(label + '：エラーなし', !errs.length, errs.slice(0, 3).join(' | '));
+}
+
 (async () => {
   if (SHOTS) fs.mkdirSync(OUT, { recursive: true });
   const srv = await serve(ROOT);
@@ -239,6 +321,11 @@ async function runFlow(pg, label) {
     pg.__base = srv.url;
     try { await runFlow(pg, label); } catch (e) { check(label + '：最後まで通る', false, e.message.split('\n')[0]); }
     await ctx.close();
+    const ctx2 = await b.newContext({ viewport: vp, deviceScaleFactor: 2 });
+    const pg2 = await ctx2.newPage();
+    pg2.__base = srv.url;
+    try { await throwFlow(pg2, label); } catch (e) { check(label + '：投射が最後まで通る', false, e.message.split('\n')[0]); }
+    await ctx2.close();
   }
   await b.close(); srv.close();
   console.log(fails ? '\n' + fails + ' 件失敗' : '\nすべて通りました');

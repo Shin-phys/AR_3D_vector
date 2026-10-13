@@ -157,12 +157,19 @@
       <div class="sub">運動する面に置いた紙の四隅を、<b>長い辺の端から</b>一周する順に押します。
         押したあと指でずらして角に合わせ、「決定」。</div>
     </div>
+    <!-- 紙を置いた面。鉛直な面（ボード）では、どちらが「下」かを糸で決める -->
+    <div class="row tight spaced">
+      <span class="sub">面</span>
+      <label class="chk"><input type="radio" name="plane" value="horizontal" checked> 机・床（水平）</label>
+      <label class="chk"><input type="radio" name="plane" value="vertical"> 壁・ボード（鉛直）</label>
+    </div>
     <div class="row tight spaced">
       <span class="sub">紙</span>
       <select id="paperSel" class="grow">
         <option value="A4" selected>A4（29.7 × 21.0 cm）</option>
         <option value="B5">B5（25.7 × 18.2 cm）</option>
         <option value="A3">A3（42.0 × 29.7 cm）</option>
+        <option value="HALF">模造紙の半分（78.8 × 54.5 cm）</option>
         <option value="custom">そのほか（寸法を入れる）</option>
       </select>
     </div>
@@ -180,6 +187,18 @@
     </div>
     <div class="sub spaced" id="cornerInfo"></div>
     <button id="cornerSwap" class="ghost hide spaced">長い辺と短い辺を入れ替える</button>
+
+    <!-- 鉛直の基準（ボードのときだけ）。糸は本物の鉛直なので、アプリが「下」を仮定せずに済む -->
+    <div id="plumbBox" class="hide spaced">
+      <div class="lead-sm">鉛直（下向き）を決める</div>
+      <div class="sub spaced-sm">紙の近くに、おもりを吊るした糸を写してください。
+        糸の<b>上の点 → 下の点</b>の順に押します。</div>
+      <div class="row tight spaced-sm">
+        <button id="plumbStart" class="grow">糸の2点を押す</button>
+        <button id="plumbClear" class="ghost hide">消す</button>
+      </div>
+      <div class="sub spaced-sm" id="plumbInfo"></div>
+    </div>
   </div>
 
   <div class="card card-tool" id="markCard">
@@ -334,6 +353,7 @@
         <button data-view="camera">撮影位置</button>
       </div>
       <div class="sub spaced" id="viewGuide"></div>
+      <div class="sub spaced hide" id="qualityNote"></div>
 
       <div class="sub spaced">表示</div>
       <div class="layers spaced-sm">
@@ -358,8 +378,10 @@
 
       <div class="sub spaced">影</div>
       <div class="layers spaced-sm">
-        <label class="chk"><input type="checkbox" id="lyWallBack"> 奥の壁に影を落とす</label>
+        <label class="chk" id="lyWallBackL"><input type="checkbox" id="lyWallBack"> 奥の壁に影を落とす</label>
         <label class="chk"><input type="checkbox" id="lyWallSide"> 横の壁に影を落とす</label>
+        <label class="chk hide" id="lyFloorL"><input type="checkbox" id="lyFloor"> 床に影を落とす</label>
+        <label class="chk"><input type="checkbox" id="lyArrowSh" checked> 矢印の影も落とす</label>
       </div>
 
       <div class="slider spaced">

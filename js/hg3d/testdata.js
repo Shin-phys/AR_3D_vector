@@ -44,8 +44,14 @@
     fw = n(fw);
     /* 真上から（elev = 90°）は上方向が決まらないので、そのときは −z を画面の上にする */
     const upW = Math.abs(fw[1]) > 0.999 ? [0, 0, -1] : [0, 1, 0];
-    const right = n(cr(fw, upW));
-    const down = n(cr(fw, right));
+    let right = n(cr(fw, upW));
+    let down = n(cr(fw, right));
+    /* 傾けて構えた（ロール）。糸が無いとき「画面の下」がずれることを確かめるため */
+    if (o.roll) {
+      const r = o.roll * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+      const R2 = right.map((v, i) => c * v + s * down[i]), D2 = down.map((v, i) => -s * right[i] + c * v);
+      right = R2; down = D2;
+    }
     function project(p) {
       const r = [p.x - pos.x, p.y - pos.y, p.z - pos.z];
       const xc = r[0] * right[0] + r[1] * right[1] + r[2] * right[2];
@@ -90,5 +96,43 @@
              center: { x: c.x, y: 0, z: c.z }, R: R, T: T, paper: paper };
   }
 
-  HG.testdata = { rng, camera, circle };
+  /**
+   * ボード（鉛直な面 z = 0）に沿った斜方投射。紙は A4 横向きでボードに貼る。
+   * @param o {v0:{x,y}, g, fps, offset（ボールがボードの手前に出ている距離 m）, noise, tapNoise,
+   *           plumbNoise, cam:{dist, elev, azim, roll}, seed}
+   * 世界座標：x 右、y 上、z ボードから手前。紙の角 A は左上（長い辺の端）。
+   */
+  function projectile(o) {
+    o = o || {};
+    const g = rng(o.seed || 3);
+    const G = o.g || 9.8, fps = o.fps || 60;
+    const v0 = o.v0 || { x: 1.5, y: 2.6 };
+    const p0 = o.p0 || { x: -0.40, y: -0.05 };
+    const zoff = o.offset === undefined ? 0 : o.offset;
+    const noise = o.noise === undefined ? 1 : o.noise;
+    const tapNoise = o.tapNoise === undefined ? 2 : o.tapNoise;
+    const plumbNoise = o.plumbNoise === undefined ? 2 : o.plumbNoise;
+    const T = 2 * v0.y / G;
+    const cam = camera(Object.assign({ target: { x: 0, y: 0.05, z: 0 }, elev: 8, dist: 1.6 }, o.cam || {}));
+    const PW = (o.paper && o.paper.w) || 0.297, PH = (o.paper && o.paper.h) || 0.210, cx = 0, cy = 0.05;
+    const corners = [[cx - PW / 2, cy + PH / 2], [cx + PW / 2, cy + PH / 2], [cx + PW / 2, cy - PH / 2], [cx - PW / 2, cy - PH / 2]]
+      .map(q => { const p = cam.project({ x: q[0], y: q[1], z: 0 }); return { x: p.x + tapNoise * g.gauss(), y: p.y + tapNoise * g.gauss() }; });
+    /* 糸：紙の右、ボードから 1 cm 手前に吊るす */
+    const plumb = [{ x: 0.30, y: 0.35, z: 0.01 }, { x: 0.30, y: -0.20, z: 0.01 }]
+      .map(q => { const p = cam.project(q); return { x: p.x + plumbNoise * g.gauss(), y: p.y + plumbNoise * g.gauss() }; });
+    const frames = [], truth = [];
+    const n = Math.floor(T * fps);
+    for (let i = 0; i <= n; i++) {
+      const t = i / fps;
+      const w = { x: p0.x + v0.x * t, y: p0.y + v0.y * t - G * t * t / 2, z: zoff };
+      const p = cam.project(w);
+      const x = p.x + noise * g.gauss(), y = p.y + noise * g.gauss();
+      frames.push({ index: i, t: t, x: x, y: y, rawX: x, rawY: y, found: true, manual: false });
+      truth.push(w);
+    }
+    return { W: cam.W, H: cam.H, camera: cam, corners: corners, plumb: plumb, frames: frames, truth: truth,
+             g: G, v0: v0, paper: { w: PW, h: PH } };
+  }
+
+  HG.testdata = { rng, camera, circle, projectile };
 })(typeof window !== 'undefined' ? (window.HG = window.HG || {}) : (globalThis.HG = globalThis.HG || {}));

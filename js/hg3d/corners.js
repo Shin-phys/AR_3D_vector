@@ -21,7 +21,7 @@
   'use strict';
 
   const $ = HG.$;
-  let pick = null;      // { pts:[{x,y}], frame }
+  let pick = null;      // { kind:'corners'|'plumb', pts:[{x,y}], frame }
   let aim = null;       // { x, y } 元解像度（画像上の実位置）
   const ORD = ['1つ目', '2つ目', '3つ目', '4つ目'];
 
@@ -33,11 +33,16 @@
     h.classList.remove('fade');
   }
 
-  function start() {
+  function start(kind) {
     if (!HG.state.frames.length) return;
+    kind = kind === 'plumb' ? 'plumb' : 'corners';
+    if (kind === 'plumb' && !HG.recon.ready()) {
+      HG.dom.html('#plumbInfo', '<span class="warn">先に紙の四隅を押してください。</span>');
+      return;
+    }
     /* 動画のコマの上で押す（色選択と同じく、描き直してから） */
     try { HG.frames.drawToOffscreen(); } catch (e) { /* 動画が無ければ何もしない */ }
-    pick = { pts: [], frame: HG.ui.current };
+    pick = { kind: kind, pts: [], frame: HG.ui.current };
     aim = null;
     HG.dom.show('#cornerPickRow');
     HG.dom.hide('#cornerStart');
@@ -51,10 +56,18 @@
     /* 帯が出て貼り付くブロックが厚くなるので、「決定」が隠れないところまで送る */
     /* PC（2カラム）では画面は動かさない。押している最中に画面が流れると、狙った角がずれる */
     if (window.innerWidth < 900) setTimeout(() => { if (HG.steps) HG.steps.goTo('#cornerPickRow'); }, 60);
+    HG.dom.hide('#plumbStart');
   }
 
   function prompt() {
     const i = pick.pts.length;
+    if (pick.kind === 'plumb') {
+      HG.dom.text('#cornerDecide', (i === 0 ? '糸の上の点' : '糸の下の点') + 'を決定');
+      hint(i === 0 ? '糸の上のほうの点を押してください' : '同じ糸の、下のほう（おもりの近く）を押してください');
+      HG.dom.html('#loupeInfo', '<div class="sub"><b>' + (i === 0 ? '糸の上' : '糸の下') + '</b>：' +
+        '糸の真ん中に合わせます。2点は離れているほど正確です。</div>');
+      return;
+    }
     HG.dom.text('#cornerDecide', ORD[i] + 'の角を決定');
     hint(i === 0 ? '紙の角を押してください（長い辺の端から）'
        : i === 1 ? '同じ長い辺の、反対の端の角を押してください'
@@ -74,7 +87,7 @@
 
   function decide() {
     if (!pick) return;
-    if (!aim) { HG.dom.html('#loupeInfo', '<span class="warn">先に画面の角をタップしてください。</span>'); return; }
+    if (!aim) { HG.dom.html('#loupeInfo', '<span class="warn">先に画面をタップしてください。</span>'); return; }
     if (HG.ui.current !== pick.frame) {
       /* 紙が回っていると、別のコマの角が混ざる */
       pick.pts = []; pick.frame = HG.ui.current; aim = null;
@@ -84,8 +97,21 @@
     }
     pick.pts.push({ x: aim.x, y: aim.y });
     aim = null;
-    if (pick.pts.length < 4) { prompt(); HG.stage.render(); return; }
-    finish();
+    const need = pick.kind === 'plumb' ? 2 : 4;
+    if (pick.pts.length < need) { prompt(); HG.stage.render(); return; }
+    if (pick.kind === 'plumb') finishPlumb(); else finish();
+  }
+
+  function finishPlumb() {
+    const pts = pick.pts, frame = pick.frame;
+    end();
+    if (Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) < 20) {
+      HG.dom.html('#plumbInfo', '<span class="warn">2点が近すぎます。糸の上と下を離して押してください。</span>');
+      return;
+    }
+    HG.recon.setPlumb(pts, frame);
+    solve();
+    HG.stage.render();
   }
 
   function finish() {
@@ -108,6 +134,7 @@
     pick = null; aim = null;
     HG.dom.hide('#cornerPickRow');
     HG.dom.show('#cornerStart');
+    HG.dom.show('#plumbStart');
     HG.pointer.setKeepBand(false);
     HG.pointer.setDownHandler(null);
     HG.pointer.setPreview(null);
@@ -126,7 +153,26 @@
     return r;
   }
 
+  function plumbInfo() {
+    const st = S();
+    $('#plumbBox').classList.toggle('hide', st.plane !== 'vertical');
+    $('#plumbClear').classList.toggle('hide', st.plumb.length !== 2);
+    $('#plumbStart').textContent = st.plumb.length === 2 ? '糸の2点を押し直す' : '糸の2点を押す';
+    if (st.plane !== 'vertical') return;
+    if (!HG.recon.ready()) { HG.dom.html('#plumbInfo', ''); return; }
+    if (st.downSource === 'plumb') {
+      /* 糸が画面の真下からどれだけ傾いて写っているか（スマホの傾きの目安） */
+      const pl = st.plumb, ang = Math.atan2(pl[1].x - pl[0].x, pl[1].y - pl[0].y) * 180 / Math.PI;
+      HG.dom.html('#plumbInfo', '<span class="ok">糸で鉛直を決めました。</span>' +
+        '<span class="sub">（画面の上では、真下から ' + Math.abs(ang).toFixed(1) + '° 傾いて写っています）</span>');
+    } else {
+      HG.dom.html('#plumbInfo', '<span class="warn">糸がまだ無いので、画面の下を鉛直下向きとみなしています。</span>' +
+        '<div class="sub">スマホを傾けて構えていると、そのぶん「下」がずれます（合成データで、4° 傾けると Δv の向きが約 4° ずれた）。</div>');
+    }
+  }
+
   function info() {
+    plumbInfo();
     const st = S();
     $('#cornerRedo').classList.toggle('hide', st.corners.length !== 4);
     $('#cornerSwap').classList.toggle('hide', st.corners.length !== 4);
@@ -172,6 +218,18 @@
         ctx.beginPath(); ctx.arc(c.x, c.y, 4 * dpr, 0, Math.PI * 2); ctx.fill();
         tag(ctx, c.x + 12 * dpr, c.y - 12 * dpr, String(i + 1), false);
       });
+    }
+    /* 糸（鉛直の基準）。押している最中は押した点、決めたあとは下向きの矢印と「下」 */
+    const pl = (pick && pick.kind === 'plumb') ? pick.pts : (st.plane === 'vertical' ? st.plumb : []);
+    if (pl.length) {
+      ctx.fillStyle = 'rgba(0,200,255,.95)';
+      const a = HG.coords.toCanvas(pl[0].x, pl[0].y);
+      ctx.beginPath(); ctx.arc(a.x, a.y, 4 * dpr, 0, Math.PI * 2); ctx.fill();
+      if (pl.length === 2) {
+        const b = HG.coords.toCanvas(pl[1].x, pl[1].y);
+        HG.arrows.draw(ctx, a.x, a.y, b.x, b.y, { color: 'rgba(0,200,255,.95)', width: 2.5, head: 10 });
+        tag(ctx, b.x + 18 * dpr, b.y + 18 * dpr, '下', true);
+      }
     }
     if (pick && aim) {
       const c = HG.coords.toCanvas(aim.x, aim.y);
@@ -229,7 +287,10 @@
   }
 
   function attach() {
-    $('#cornerStart').onclick = start;
+    $('#cornerStart').onclick = () => start('corners');
+    $('#plumbStart').onclick = () => start('plumb');
+    $('#plumbClear').onclick = () => { HG.recon.setPlumb([], null); solve(); HG.stage.render(); };
+    document.querySelectorAll('input[name=plane]').forEach(r => { r.onchange = () => setPlane(r.value); });
     $('#cornerDecide').onclick = decide;
     $('#cornerCancel').onclick = () => {
       end();
@@ -251,5 +312,19 @@
     info();
   }
 
-  HG.corners = { attach, paint, picking: () => !!pick, solve };
+  /** 紙を置いた面（プリセットからも呼ぶ） */
+  function setPlane(p) {
+    HG.recon.setPlane(p);
+    document.querySelectorAll('input[name=plane]').forEach(r => { r.checked = (r.value === HG.recon.state.plane); });
+    solve();
+    HG.stage.render();
+  }
+
+  /** 紙の寸法を外から決める（お手本動画は答えの寸法で撮ってある） */
+  function setPaperBy(key) {
+    $('#paperSel').value = key;
+    setPaper();
+  }
+
+  HG.corners = { attach, paint, picking: () => !!pick, solve, setPlane, setPaperBy };
 })(window.HG = window.HG || {});

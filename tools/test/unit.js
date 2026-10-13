@@ -164,5 +164,66 @@ run('真上・8点', Object.assign({}, base, { cam: { dist: 1.2, elev: 90 }, see
         '時計回りに押す ' + turn(a) + ' ／ 反時計回り ' + turn(b));
 }
 
+
+/* ===== 鉛直な面（ボードに沿った斜方投射）=====
+   紙を壁に貼り、紙の近くに吊るした糸で鉛直を決める。
+   見たいのは「Δv が鉛直下向き」「水平の速度が一定（床の影が等間隔）」 */
+function throwRun(label, opt, n, usePlumb) {
+  const d = HG.testdata.projectile(opt);
+  HG.recon.clearCorners();
+  HG.recon.state.paper = { w: (opt.paper || {}).w || 0.297, h: (opt.paper || {}).h || 0.210 };
+  HG.recon.setPlane('vertical');
+  HG.recon.setPlumb(usePlumb ? d.plumb : [], 0);
+  HG.recon.setCorners(d.corners, 0);
+  const sv = HG.recon.solve(d.W, d.H);
+  if (!sv.ok) { check(label + '：解ける', false, sv.reason); return null; }
+  const m = Math.max(1, Math.floor((d.frames.length - 1) / (n - 1)));
+  const sel = d.frames.filter((f, i) => i % m === 0).slice(0, n);
+  const r = HG.recon.computeFrom(sel, d.frames);
+  let worst = 0;
+  r.kin.a.forEach(a => {
+    const ang = Math.atan2(Math.hypot(a.d2.x, a.d2.z), -a.d2.y) * 180 / Math.PI;   // 真下からの角
+    worst = Math.max(worst, ang);
+  });
+  const vx = r.kin.v.map(v => v.vx);
+  const vxs = Math.max(...vx) - Math.min(...vx), vxm = vx.reduce((s, v) => s + v, 0) / vx.length;
+  const gm = r.kin.a.reduce((s, a) => s - a.ay, 0) / r.kin.a.length;
+  return { worst: worst, vxSpread: vxs / Math.abs(vxm) * 100, g: gm, r: r, d: d };
+}
+const HALF = { w: 0.788, h: 0.545 };   // 模造紙を半分に切ったもの（788×545 mm）
+console.log('\n[合成データ] ボードに沿った斜方投射（1.6 m・仰角8°、追跡 σ=1px、四隅・糸 σ=2px、60 fps、基準は模造紙の半分）');
+{
+  const base = { seed: 4, cam: { dist: 1.6, elev: 8, azim: 0 }, paper: HALF };
+  const a = throwRun('正面', base, 5, true);
+  check('投射・正面・5点：Δv が鉛直下向き ±5° 以内', a.worst <= 5, '最大 ' + a.worst.toFixed(2) + '°');
+  check('投射・正面・5点：水平の速度が一定（ばらつき 5% 以内）', a.vxSpread <= 5, a.vxSpread.toFixed(2) + '%');
+  check('投射・正面・5点：Δv÷Δt が 9.8 m/s² の ±5%', Math.abs(a.g - 9.8) / 9.8 < 0.05, a.g.toFixed(2) + ' m/s²');
+  const b = throwRun('斜め', Object.assign({}, base, { cam: { dist: 1.6, elev: 15, azim: 25 }, seed: 6 }), 5, true);
+  check('投射・横から25°・仰角15°：Δv が鉛直下向き ±5° 以内', b.worst <= 5, '最大 ' + b.worst.toFixed(2) + '°');
+  /* ボールがボードの手前 3.5 cm を飛ぶ：大きさは d/L ≒ 2% ずれる見積もり。向きは変わらないはず */
+  const c = throwRun('手前3.5cm', Object.assign({}, base, { offset: 0.035, seed: 8 }), 5, true);
+  check('投射・ボードの手前 3.5 cm：Δv の向き ±5°（大きさは参考）', c.worst <= 5,
+        '最大 ' + c.worst.toFixed(2) + '°、g = ' + c.g.toFixed(2) + '（見積もり 9.8×1.6/(1.6−0.035) = ' + (9.8 * 1.6 / 1.565).toFixed(2) + '）');
+  /* 糸が無いとき：画面の下を下とみなす。スマホを 4° 傾けて構えると、そのぶんずれる */
+  const e = throwRun('糸なし・ロール4°', Object.assign({}, base, { cam: { dist: 1.6, elev: 8, roll: 4 } }), 5, false);
+  const f = throwRun('糸あり・ロール4°', Object.assign({}, base, { cam: { dist: 1.6, elev: 8, roll: 4 } }), 5, true);
+  check('投射・スマホを4°傾けた：糸ありなら ±5° に収まる', f.worst <= 5, '糸あり 最大 ' + f.worst.toFixed(2) + '°');
+  check('投射・スマホを4°傾けた：糸なしは傾けたぶんずれる', e.worst > f.worst + 2,
+        '糸なし 最大 ' + e.worst.toFixed(2) + '°');
+  /* ★ 基準が小さいと、紙の外で誤差がふくらむ ★
+     A4 1枚（軌道の幅の約3分の1）だと、四隅の 2px のずれが紙の外へ引き伸ばされる。40通りの中央値で比べる */
+  const med = (paper, n) => { const v = []; for (let s = 1; s <= 40; s++) v.push(throwRun('', Object.assign({}, base, { paper: paper, seed: s }), n, true).worst);
+    v.sort((x, y) => x - y); return v[20]; };
+  const mA4 = med({ w: 0.297, h: 0.210 }, 5), mHalf = med(HALF, 5);
+  check('投射：基準が A4 だと向きのずれが大きい（見積もりの裏付け）', mA4 > mHalf * 1.8,
+        '中央値 A4 ' + mA4.toFixed(1) + '° ／ 模造紙の半分 ' + mHalf.toFixed(1) + '°（5点、40通り）');
+  /* 座標系：カメラは +z（手前）、上は +y */
+  HG.recon.clearCorners(); HG.recon.state.paper = HALF; HG.recon.setPlumb(a.d.plumb, 0); HG.recon.setCorners(a.d.corners, 0); HG.recon.solve(a.d.W, a.d.H);
+  const cw = HG.recon.cameraWorld();
+  check('投射：カメラが手前（z > 0）、Δv は −y', cw.pos.z > 0.5 && a.r.kin.a.every(q => q.d2.y < 0),
+        'カメラ z = ' + cw.pos.z.toFixed(2) + ' m');
+  HG.recon.setPlane('horizontal'); HG.recon.setPlumb([], null); HG.recon.state.paper = { w: 0.297, h: 0.210 };
+}
+
 console.log(fails ? '\n' + fails + ' 件失敗' : '\nすべて通りました');
 process.exit(fails ? 1 : 0);

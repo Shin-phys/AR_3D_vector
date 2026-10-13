@@ -52,21 +52,23 @@
    * 3D の x を画面の右、z をカメラ側に合わせてあるので（reconstruct.js）、
    * 「斜め」から見るとこの2枚が奥と左に立つ。
    */
-  function stage(ext) {
+  function stage(ext, plane) {
     const s = sizes(ext.S);
     const m = 0.15 * ext.S;
     const floorY = Math.min(0, ext.box.y0) - s.ball;
     const step = 0.1;
     const x0 = Math.floor((ext.box.x0 - m) / step) * step, x1 = Math.ceil((ext.box.x1 + m) / step) * step;
-    const z0 = Math.floor((ext.box.z0 - m) / step) * step, z1 = Math.ceil((ext.box.z1 + m) / step) * step;
+    let z0 = Math.floor((ext.box.z0 - m) / step) * step, z1 = Math.ceil((ext.box.z1 + m) / step) * step;
+    /* 鉛直な面（ボード）では、運動は z = 0 の面の中だけ。床をカメラ側へ広げ、ボードを奥に立てる */
+    if (plane === 'vertical') { z0 = -step; z1 = Math.max(z1, Math.ceil(0.45 * ext.S / step) * step); }
     const top = Math.max(ext.box.y1, 0) + Math.max(0.12, 0.35 * ext.S);
     return { floorY: floorY, x0: x0, x1: x1, z0: z0, z1: z1, top: top, step: step,
              wallBack: z0, wallSide: x0 };
   }
 
   /**
-   * @param data  {track, trackAll, kin:{v,a}, paper:[A,B,C,D]}
-   * @param opt   {layers:{balls,paper,grid,pos,vel,dv,wallBack,wallSide,axes}, dvZoom}
+   * @param data  {track, trackAll, kin:{v,a}, paper:[A,B,C,D], plane, plumb:[上,下]}
+   * @param opt   {layers:{balls,paper,grid,pos,vel,dv,wallBack,wallSide,floor,arrowSh,axes}, dvZoom}
    * @returns     {group, ext, stage, sizes}
    */
   function build(data, opt) {
@@ -76,14 +78,30 @@
     const g = new THREE.Group();
     const ext = extent(data);
     if (!ext) return { group: g, ext: null };
-    const s = sizes(ext.S), st = stage(ext);
+    const vertical = data.plane === 'vertical';
+    const s = sizes(ext.S), st = stage(ext, data.plane);
 
     /* 床（目盛りと紙）。球の半径だけ下げて描く（このファイルの冒頭を参照） */
     const floor = new THREE.Group();
     if (L.grid !== false) floor.add(M.grid(st.x0, st.x1, st.z0, st.z1, 0, st.step, s.grid));
-    if (L.paper !== false && data.paper) floor.add(M.paper(data.paper, s.grid * 1.3));
+    if (!vertical && L.paper !== false && data.paper) floor.add(M.paper(data.paper, s.grid * 1.3));
     floor.position.y = st.floorY;
     g.add(floor);
+    /* 鉛直な面：紙はボードに貼ってあるので床ではなく奥に立てる。球が埋まらないよう球の半径だけ奥へ。
+       ボードそのものも薄く描く（奥の壁の代わり。運動はこの面の中なので、ここに影は落とさない） */
+    if (vertical && L.paper !== false) {
+      const back = new THREE.Group();
+      back.add(M.wall('z', -0.002, st.x0, st.x1, st.floorY, st.top));
+      /* ボードとの間を 5 mm 空ける（1 mm だと遠くから見たとき奥行きの精度が足りず、紙がボードの色に沈んだ） */
+      if (data.paper) back.add(M.paper(data.paper.map(p => ({ x: p.x, y: p.y, z: p.z + 0.005 })), s.grid * 1.3));
+      back.position.z = -s.ball;
+      g.add(back);
+    }
+    /* 糸（鉛直の基準）。測った鉛直そのものなので、そのまま描く */
+    if (vertical && data.plumb && L.paper !== false) {
+      g.add(M.rod(data.plumb[0], data.plumb[1], s.grid * 0.8, '#12161c', 0.8));
+      g.add(M.ball(data.plumb[1], s.ball * 0.8, '#5b6572'));
+    }
 
     /* 軸は「向きの印」として部屋の隅（奥の壁と横の壁が出会う床の角）に置く。
        ★ 紙の角 A に置かないこと。★ 運動のすぐそばに来て、Δv の矢印と重なった（実機）。
@@ -118,16 +136,33 @@
 
     /* 壁と影。影は「使うコマ」の球だけ（ストロボと同じ点） */
     const hW = st.top - st.floorY;
-    if (L.wallBack) {
+    const surf = [];      // 影を落とす面：{ put(p) → 面の上の点, flat(v) → 面に沿った成分 }
+    if (L.wallBack && !vertical) {
       g.add(M.wall('z', st.wallBack, st.x0, st.x1, st.floorY, st.top));
       tr.forEach(p => g.add(M.disc({ x: p.x, y: p.y, z: st.wallBack + 0.002 }, s.ball * 0.9, 'z', C.shadow, 0.75)));
+      surf.push({ put: p => ({ x: p.x, y: p.y, z: st.wallBack + 0.004 }), flat: v => ({ x: v.x, y: v.y, z: 0 }) });
     }
     if (L.wallSide) {
       g.add(M.wall('x', st.wallSide, st.z0, st.z1, st.floorY, st.top));
       tr.forEach(p => g.add(M.disc({ x: st.wallSide + 0.002, y: p.y, z: p.z }, s.ball * 0.9, 'x', C.shadow, 0.75)));
+      surf.push({ put: p => ({ x: st.wallSide + 0.004, y: p.y, z: p.z }), flat: v => ({ x: 0, y: v.y, z: v.z }) });
+    }
+    /* 床の影（真上からの光）。机の上の運動では運動そのものと重なるので、鉛直な面のときだけ */
+    if (L.floor && vertical) {
+      tr.forEach(p => g.add(M.disc({ x: p.x, y: st.floorY + 0.002, z: p.z }, s.ball * 0.9, 'y', C.shadow, 0.75)));
+      surf.push({ put: p => ({ x: p.x, y: st.floorY + 0.004, z: p.z }), flat: v => ({ x: v.x, y: 0, z: v.z }) });
+    }
+    /* ★ 矢印の影（成分分解の代わり）★
+       速度と Δv の矢印も同じ光で壁や床に落とす。成分の矢印を別に描くより、
+       「影」という1つの言葉で位置も速度も加速度も読める（2026-10-13 に決めた）。
+       斜方投射なら Δv の床の影はほぼ点（水平成分ゼロ）、横の壁の影は下向きになる。 */
+    if (L.arrowSh !== false && surf.length) {
+      const sh = (from, v, color, r) => surf.forEach(f => g.add(M.arrow(f.put(from), f.flat(v), color, r, 0.5)));
+      if (L.vel) kin.v.forEach(v => sh(v.from, v.d, C.vel, s.arrow * 0.7));
+      if (L.dv) kin.a.forEach(a => sh(a.at, { x: a.d2.x * zoom, y: a.d2.y * zoom, z: a.d2.z * zoom }, C.dv, s.arrow * 0.8));
     }
     g.userData = { hW: hW };
-    return { group: g, ext: ext, stage: st, sizes: s };
+    return { group: g, ext: ext, stage: st, sizes: s, plane: data.plane || 'horizontal' };
   }
 
   /* ---------- 「いま」の球と影（動くもの） ----------
@@ -152,6 +187,17 @@
       o.rayS = named(unitRod(), 'HGANIM_rayS');
       o.parts.push(o.shS, o.rayS);
     }
+    if (layers.floor && built.plane === 'vertical') {
+      o.shF = named(M.disc({ x: 0, y: 0, z: 0 }, s.ball * 1.1, 'y', '#12161c', 0.95), 'HGANIM_shF');
+      o.rayF = named(unitRod(), 'HGANIM_rayF');
+      o.parts.push(o.shF, o.rayF);
+    }
+    /* 鉛直な面のときは奥の壁（＝ボード）に影を落とさない */
+    if (built.plane === 'vertical' && o.shB) {
+      g.remove(o.shB); g.remove(o.rayB);
+      o.parts = o.parts.filter(m => m !== o.shB && m !== o.rayB);
+      o.shB = o.rayB = null;
+    }
     return o;
   }
 
@@ -175,6 +221,11 @@
       const q = { x: st.wallSide + 0.003, y: p.y, z: p.z };
       o.shS.position.set(q.x, q.y, q.z);
       setRod(o.rayS, p, q, o.r);
+    }
+    if (o.shF) {
+      const q = { x: p.x, y: st.floorY + 0.003, z: p.z };
+      o.shF.position.set(q.x, q.y, q.z);
+      setRod(o.rayF, p, q, o.r);
     }
     o.parts.forEach(m => m.updateMatrix());
   }

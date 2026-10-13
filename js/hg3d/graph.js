@@ -12,10 +12,21 @@
   'use strict';
 
   let cv = null, ctx = null, onScrub = null, last = null;
-  const SERIES = {
-    back: { key: 'x', color: '#12161c', name: '奥の壁の影（x：水平・右）' },
-    side: { key: 'z', color: '#7c3aed', name: '横の壁の影（z：水平・手前）' }
+  /* どの影の、どの座標を描くか。面の向きで変わる（動いて見える座標を描く）。
+     机の上の運動：奥の壁の影は x、横の壁の影は z（どちらも水平）
+     ボードの運動：床の影は x（水平）、横の壁の影は y（鉛直） */
+  const SERIES_BY_PLANE = {
+    horizontal: {
+      back: { key: 'x', color: '#12161c', name: '奥の壁の影（x：水平・右）' },
+      side: { key: 'z', color: '#7c3aed', name: '横の壁の影（z：水平・手前）' }
+    },
+    vertical: {
+      floor: { key: 'x', color: '#12161c', name: '床の影（x：水平・右）' },
+      side:  { key: 'y', color: '#7c3aed', name: '横の壁の影（y：鉛直・上）' }
+    }
   };
+  let SERIES = SERIES_BY_PLANE.horizontal;
+  function setPlane(p) { SERIES = SERIES_BY_PLANE[p === 'vertical' ? 'vertical' : 'horizontal']; }
   const PAD = { l: 46, r: 12, t: 12, b: 30 };
 
   function attach(canvas, scrub) {
@@ -126,5 +137,5 @@
       '<span class="sw" style="background:' + SERIES[k].color + '"></span> ' + SERIES[k].name).join('　');
   }
 
-  HG.graph = { attach, draw, legend };
+  HG.graph = { attach, draw, legend, setPlane };
 })(window.HG = window.HG || {});

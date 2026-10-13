@@ -130,7 +130,7 @@
     add('z 水平（手前）', { x: O.x, y: O.y, z: O.z + a }, 'ax-z');
     if (opts.layers.pos) add('A（基準点）', { x: 0, y: 0, z: 0 }, 'origin');
     const st = built.stage;
-    if (opts.layers.wallBack) add('奥の壁', { x: (st.x0 + st.x1) / 2, y: st.top, z: st.wallBack }, 'wall');
+    if (opts.layers.wallBack && built.plane !== 'vertical') add('奥の壁', { x: (st.x0 + st.x1) / 2, y: st.top, z: st.wallBack }, 'wall');
     if (opts.layers.wallSide) add('横の壁', { x: st.wallSide, y: st.top, z: (st.z0 + st.z1) / 2 }, 'wall');
   }
 
@@ -189,7 +189,8 @@
         return { tgt: T, s: sph(P, T), fov: cw.fovY };
       }
     }
-    /* 斜め（既定） */
+    /* 斜め（既定）。鉛直な面（ボード）は低めから見たほうが放物線の形が分かる */
+    if (built && built.plane === 'vertical') return { tgt: tgt, s: { r: r * 1.25, polar: 70 * DEG, azim: 35 * DEG }, fov: FOV };
     return { tgt: tgt, s: { r: r * 1.2, polar: 55 * DEG, azim: 28 * DEG }, fov: FOV };
   }
 

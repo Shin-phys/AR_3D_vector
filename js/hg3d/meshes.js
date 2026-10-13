@@ -120,6 +120,8 @@
     const face = new THREE.Mesh(geo, m);
     /* 上から見ても下から見ても見えるように（法線の向きは押す順で変わる） */
     face.material = m.clone(); face.material.side = THREE.DoubleSide;
+    /* 立てた紙（ボード）は光が横から当たって灰色に沈み、ボードと見分けられなかった。少し自分で光らせる */
+    face.material.emissive = new THREE.Color('#5a5a5a');
     g.add(face);
     const r = edge || 0.0016;
     for (let i = 0; i < 4; i++) {

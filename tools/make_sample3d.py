@@ -2,7 +2,8 @@
 """
 tools/make_sample3d.py — お手本動画（合成）を作って js/hg3d/samples3d.js に埋め込む
 
-  python3 tools/make_sample3d.py
+  python3 tools/make_sample3d.py            # 両方
+  python3 tools/make_sample3d.py throw      # 投射だけ作り直す
 
 ターンテーブルの上の A4 の紙と、紙に貼ったピンクのシール（中心に黒点）を、
 標準カメラ（横の画角 69°）で 0.55 m・仰角 40° の斜め上から撮った絵を描く。
@@ -74,7 +75,7 @@ def frame(t):
     img = img.reshape(H, SS, W, SS, 3).mean(axis=(1, 3))
     return (np.clip(img, 0, 1) * 255).astype(np.uint8)
 
-def main():
+def turntable():
     n = int(round(DUR * FPS))
     tmp = pathlib.Path(tempfile.mkdtemp())
     for i in range(n + 1):
@@ -102,22 +103,113 @@ def main():
     }
     (out / 'turntable.json').write_text(json.dumps(truth, indent=1), encoding='utf-8')
 
+    print('turntable', [ (out / q).stat().st_size // 1024 for q in ['turntable.mp4', 'turntable.webm'] ], 'KB')
+
+
+# ===================================================================
+# ボードに沿った斜方投射（鉛直な面の 4-A）
+#   ボード（灰色）に模造紙の半分（788×545 mm、白）を貼り、右に糸とおもり。
+#   ピンクのボール（半径 3 cm、中心に黒点）がボードの手前 3.5 cm を飛ぶ。
+#   カメラは標準（横の画角 69°）、ボードの正面 1.6 m・仰角 8°、60 fps。
+# ===================================================================
+def throw():
+    W2, H2, FPS2 = 960, 540, 30     # 30 fps（60 fps だと headless の走査でコマが落ちた。実機の動画は 60 fps 推奨のまま）
+    G = 9.8
+    PW2, PH2 = 0.788, 0.545
+    v0 = np.array([1.5, 2.6]); p0 = np.array([-0.40, -0.05]); ZOFF, RB = 0.035, 0.03
+    T = 2 * v0[1] / G
+    f2 = (W2 / 2) / math.tan(math.radians(69.0 / 2))
+    tgt = np.array([0.0, 0.05, 0.0]); e = math.radians(8.0)
+    pos2 = tgt + np.array([0.0, 1.6 * math.sin(e), 1.6 * math.cos(e)])
+    fw2 = (tgt - pos2) / np.linalg.norm(tgt - pos2)
+    rt2 = np.cross(fw2, [0, 1, 0]); rt2 /= np.linalg.norm(rt2)
+    dn2 = np.cross(fw2, rt2); dn2 /= np.linalg.norm(dn2)
+
+    def proj(p):
+        r = np.asarray(p, float) - pos2
+        return [float(f2 * (r @ rt2) / (r @ fw2) + W2 / 2), float(f2 * (r @ dn2) / (r @ fw2) + H2 / 2)]
+
+    ys, xs = np.mgrid[0:H2 * SS, 0:W2 * SS]
+    u = (xs + 0.5) / SS - W2 / 2; v = (ys + 0.5) / SS - H2 / 2
+    d = u[..., None] * rt2 + v[..., None] * dn2 + f2 * fw2
+    k = -pos2[2] / d[..., 2]                       # ボード（z = 0）との交点
+    X = pos2[0] + k * d[..., 0]; Y = pos2[1] + k * d[..., 1]
+    base = np.zeros((H2 * SS, W2 * SS, 3), np.float32)
+    base[:] = (0.72, 0.74, 0.76)                   # ボード
+    base[Y < -0.45] = (0.55, 0.50, 0.44)            # 床（ボードの下は床が見える体）
+    paper = (np.abs(X) < PW2 / 2) & (np.abs(Y - 0.05) < PH2 / 2)
+    base[paper] = (0.96, 0.96, 0.94)
+    # 糸（ボードの 1 cm 手前、x = 0.48）とおもり。画面上の太さ 2 px ほど
+    a = np.array(proj([0.48, 0.42, 0.01])); bpt = np.array(proj([0.48, -0.25, 0.01]))
+    P = np.stack([(xs + 0.5) / SS, (ys + 0.5) / SS], -1)
+    ab = bpt - a; tt = np.clip(((P - a) @ ab) / (ab @ ab), 0, 1)
+    dist = np.linalg.norm(P - (a + tt[..., None] * ab), axis=-1)
+    base[dist < 1.1] = (0.10, 0.10, 0.12)
+    wpt = np.array(proj([0.48, -0.27, 0.01]))
+    base[np.linalg.norm(P - wpt, axis=-1) < 7] = (0.25, 0.25, 0.28)
+
+    pre, post = int(0.2 * FPS2), int(0.2 * FPS2)
+    nfl = int(math.floor(T * FPS2))
+    n = pre + nfl + post
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    raw = tmp / 'all.rgb'
+    with open(raw, 'wb') as fo:
+        for i in range(n + 1):
+            t = min(max(0, (i - pre) / FPS2), nfl / FPS2)
+            c3 = np.array([p0[0] + v0[0] * t, p0[1] + v0[1] * t - G * t * t / 2, ZOFF])
+            cc = np.array(proj(c3)); depth = (c3 - pos2) @ fw2
+            rpx = f2 * RB / depth
+            img = base.copy()
+            dd = np.linalg.norm(P - cc, axis=-1)
+            img[dd < rpx] = (1.0, 0.24, 0.54)
+            img[dd < rpx * 0.25] = (0.05, 0.05, 0.05)
+            img = img.reshape(H2, SS, W2, SS, 3).mean(axis=(1, 3))
+            fo.write((np.clip(img, 0, 1) * 255).astype(np.uint8).tobytes())
+    common = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+              '-s', '%dx%d' % (W2, H2), '-r', str(FPS2), '-i', str(raw)]
+    out = ROOT / 'samples'
+    subprocess.run(common + ['-c:v', 'libx264', '-profile:v', 'baseline', '-pix_fmt', 'yuv420p',
+                             '-crf', '26', '-movflags', '+faststart', str(out / 'throw.mp4')], check=True)
+    subprocess.run(common + ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', '38',
+                             str(out / 'throw.webm')], check=True)
+    cy = 0.05
+    truth = {
+        'W': W2, 'H': H2, 'fps': FPS2, 'g': G, 'v0': v0.tolist(), 'offset': ZOFF, 'paper': [PW2, PH2],
+        'launchIndex': pre, 'landIndex': pre + nfl, 'launchT': pre / FPS2, 'landT': (pre + nfl) / FPS2,
+        # 長い辺の端（左上）から一周
+        'corners_t0': [proj([-PW2 / 2, cy + PH2 / 2, 0]), proj([PW2 / 2, cy + PH2 / 2, 0]),
+                       proj([PW2 / 2, cy - PH2 / 2, 0]), proj([-PW2 / 2, cy - PH2 / 2, 0])],
+        'plumb': [proj([0.48, 0.35, 0.01]), proj([0.48, -0.18, 0.01])],
+        'ball_t0': proj([p0[0], p0[1], ZOFF])
+    }
+    (out / 'throw.json').write_text(json.dumps(truth, indent=1), encoding='utf-8')
+    print('throw', [(out / q).stat().st_size // 1024 for q in ['throw.mp4', 'throw.webm']], 'KB')
+
+
+def write_js():
+    out = ROOT / 'samples'
     b64 = lambda p, m: 'data:%s;base64,%s' % (m, base64.b64encode(p.read_bytes()).decode('ascii'))
+    items = []
+    for key in ['turntable', 'throw']:
+        if not (out / (key + '.mp4')).exists():
+            continue
+        items.append('    %s: {\n      mp4: "%s",\n      webm: "%s"\n    }' % (
+            key, b64(out / (key + '.mp4'), 'video/mp4'), b64(out / (key + '.webm'), 'video/webm')))
     js = """/* 自動生成ファイル。編集しないこと。
-   tools/make_sample3d.py が samples/turntable.* から作ります（合成のお手本動画）。 */
+   tools/make_sample3d.py が samples/*.mp4|webm から作ります（合成のお手本動画）。 */
 (function (HG) {
   'use strict';
   HG.samples3d = {
-    turntable: {
-      mp4: "%s",
-      webm: "%s"
-    }
+%s
   };
 })(window.HG = window.HG || {});
-""" % (b64(out / 'turntable.mp4', 'video/mp4'), b64(out / 'turntable.webm', 'video/webm'))
+""" % ',\n'.join(items)
     (ROOT / 'js' / 'hg3d' / 'samples3d.js').write_text(js, encoding='utf-8')
-    for p in ['turntable.mp4', 'turntable.webm']:
-        print(p, (out / p).stat().st_size // 1024, 'KB')
     print('samples3d.js', len(js) // 1024, 'KB')
 
-main()
+
+import sys
+which = sys.argv[1:] or ['turntable', 'throw']
+if 'turntable' in which: turntable()
+if 'throw' in which: throw()
+write_js()
